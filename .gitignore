@@ -1,0 +1,26 @@
+# Build artifacts
+.gradle/
+build/
+dist/
+*.jar
+*.war
+*.ear
+*.class
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Runtime
+.env
+.env.local
+logs/
+*.log
+
+# Gradle wrapper
+.gradle
