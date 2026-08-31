@@ -49,6 +49,16 @@ public class WorkflowController {
         this.objectMapper = objectMapper;
     }
 
+    @GetMapping
+    public ResponseEntity<List<WorkflowResponse>> listWorkflows() {
+        List<Workflow> workflows = workflowRepository.findAll();
+        List<WorkflowResponse> responses = new ArrayList<>();
+        for (Workflow workflow : workflows) {
+            responses.add(toResponse(workflow));
+        }
+        return ResponseEntity.ok(responses);
+    }
+
     @PostMapping
     public ResponseEntity<WorkflowResponse> createWorkflow(@RequestBody WorkflowSubmissionRequest request) {
         List<TaskDefinition> definitions = new ArrayList<>();

@@ -22,11 +22,12 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, ObjectMapper.class})
+@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, ObjectMapper.class})
 @org.springframework.test.context.ContextConfiguration(classes = WorkflowOrchestratorTest.TestConfiguration.class)
 class WorkflowOrchestratorTest {
 
@@ -48,6 +49,9 @@ class WorkflowOrchestratorTest {
 
     @Autowired
     private TaskAttemptRepository taskAttemptRepository;
+
+    @Autowired
+    private TaskExecutionRegistry taskExecutionRegistry;
 
     @Test
     void executesSuccessfulWorkflow() {
@@ -85,7 +89,7 @@ class WorkflowOrchestratorTest {
         Workflow workflow = workflowOrchestrator.createAndExecuteWorkflow(List.of(first, second));
 
         assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.FAILED);
-        assertThat(taskRepository.findByWorkflow_Id(workflow.getId())).anyMatch(task -> task.getStatus() == TaskStatus.FAILED);
+        assertThat(taskRepository.findByWorkflow_Id(workflow.getId())).anyMatch(task -> task.getStatus() == TaskStatus.DEAD_LETTERED);
         assertThat(taskAttemptRepository.findAll()).isNotEmpty();
     }
 
@@ -100,5 +104,45 @@ class WorkflowOrchestratorTest {
         assertThat(taskAttemptRepository.findAll()).hasSize(1);
         assertThat(taskAttemptRepository.findAll().getFirst().getResult()).isEqualTo(com.relay.core.model.TaskResult.SUCCESS);
         assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+    }
+
+    @Test
+    void retriesTransientFailuresUntilSuccess() {
+        AtomicInteger attempts = new AtomicInteger();
+        taskExecutionRegistry.register("flaky_success", task -> {
+            if (attempts.incrementAndGet() == 1) {
+                throw new IllegalStateException("temporary failure");
+            }
+            return com.relay.core.model.TaskResult.SUCCESS;
+        });
+
+        TaskDefinition workflowTask = new TaskDefinition();
+        workflowTask.setId("flaky");
+        workflowTask.setType("flaky_success");
+
+        Workflow workflow = workflowOrchestrator.createAndExecuteWorkflow(List.of(workflowTask));
+
+        assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(attempts.get()).isEqualTo(2);
+        Task task = taskRepository.findByWorkflow_Id(workflow.getId()).getFirst();
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.SUCCEEDED);
+    }
+
+    @Test
+    void deadLettersTaskAfterRetryLimit() {
+        taskExecutionRegistry.register("always_fail", task -> {
+            throw new IllegalStateException("permanent failure");
+        });
+
+        TaskDefinition workflowTask = new TaskDefinition();
+        workflowTask.setId("terminal");
+        workflowTask.setType("always_fail");
+
+        Workflow workflow = workflowOrchestrator.createAndExecuteWorkflow(List.of(workflowTask));
+
+        assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.FAILED);
+        Task task = taskRepository.findByWorkflow_Id(workflow.getId()).getFirst();
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.DEAD_LETTERED);
+        assertThat(task.getAttemptCount()).isEqualTo(RetryPolicy.DEFAULT_MAX_ATTEMPTS);
     }
 }

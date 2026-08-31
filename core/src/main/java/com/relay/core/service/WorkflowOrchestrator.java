@@ -30,6 +30,7 @@ public class WorkflowOrchestrator {
     private final TaskAttemptRepository taskAttemptRepository;
     private final DependencyGraphResolver dependencyGraphResolver;
     private final TaskExecutionRegistry taskExecutionRegistry;
+    private final RetryPolicy retryPolicy;
     private final ObjectMapper objectMapper;
 
     public WorkflowOrchestrator(
@@ -38,6 +39,7 @@ public class WorkflowOrchestrator {
         TaskAttemptRepository taskAttemptRepository,
         DependencyGraphResolver dependencyGraphResolver,
         TaskExecutionRegistry taskExecutionRegistry,
+        RetryPolicy retryPolicy,
         ObjectMapper objectMapper
     ) {
         this.workflowRepository = workflowRepository;
@@ -45,6 +47,7 @@ public class WorkflowOrchestrator {
         this.taskAttemptRepository = taskAttemptRepository;
         this.dependencyGraphResolver = dependencyGraphResolver;
         this.taskExecutionRegistry = taskExecutionRegistry;
+        this.retryPolicy = retryPolicy;
         this.objectMapper = objectMapper;
     }
 
@@ -129,6 +132,7 @@ public class WorkflowOrchestrator {
                 attempt.setResult(null);
                 attempt.setError(null);
 
+                boolean shouldRetry = false;
                 try {
                     TaskExecutor taskExecutor = taskExecutionRegistry.resolve(task.getType());
                     TaskResult result = taskExecutor.execute(task);
@@ -139,19 +143,31 @@ public class WorkflowOrchestrator {
                         task.setStatus(TaskStatus.SUCCEEDED);
                     } else {
                         task.setStatus(TaskStatus.FAILED);
+                        shouldRetry = retryPolicy.shouldRetry(task, task.getAttemptCount() + 1);
                     }
                 } catch (Exception ex) {
                     task.setStatus(TaskStatus.FAILED);
                     attempt.setResult(TaskResult.FAILURE);
                     attempt.setError(ex.getMessage());
                     attempt.setFinishedAt(Instant.now());
+                    shouldRetry = retryPolicy.shouldRetry(task, task.getAttemptCount() + 1);
                 }
 
-                task.setAttemptCount(task.getAttemptCount() + 1);
+                int nextAttemptNumber = (task.getAttemptCount() == null ? 0 : task.getAttemptCount()) + 1;
+                task.setAttemptCount(nextAttemptNumber);
+
+                if (task.getStatus() == TaskStatus.FAILED) {
+                    if (shouldRetry) {
+                        task.setStatus(TaskStatus.PENDING);
+                    } else {
+                        task.setStatus(TaskStatus.DEAD_LETTERED);
+                    }
+                }
+
                 taskRepository.save(task);
                 taskAttemptRepository.save(attempt);
 
-                if (task.getStatus() == TaskStatus.FAILED) {
+                if (task.getStatus() == TaskStatus.DEAD_LETTERED) {
                     workflow.setStatus(WorkflowStatus.FAILED);
                     workflowRepository.save(workflow);
                     return workflowRepository.findById(workflowId).orElseThrow();
