@@ -1,26 +1,54 @@
-# Build artifacts
-.gradle/
+# Project-local docs and planning artifacts
+# Keep these files on the machine, but do not commit them.
+docs/
+plan.md
+
+# Build outputs
+target/
+**/target/
 build/
+**/build/
 dist/
+**/dist/
+*.class
 *.jar
 *.war
 *.ear
-*.class
+*.zip
 
-# IDE
+# Java / Maven / Gradle
+.gradle/
+**/.gradle/
+.gradle-cache/
+
+# IDE files
 .idea/
 .vscode/
+*.iml
 *.swp
 *.swo
 *~
 .DS_Store
-*.iml
+Thumbs.db
 
-# Runtime
+# Local runtime files
 .env
-.env.local
+.env.*
+!.env.example
 logs/
 *.log
+*.pid
 
-# Gradle wrapper
-.gradle
+# Docker / local data
+postgres_data/
+pgdata/
+volumes/
+
+# Coverage / test reports
+coverage/
+*.exec
+surefire-reports/
+
+# OS junk
+.AppleDouble
+.LSOverride
