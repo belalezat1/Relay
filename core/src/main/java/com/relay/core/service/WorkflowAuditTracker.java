@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.relay.core.model.Workflow;
 import com.relay.core.model.WorkflowAuditEvent;
 import com.relay.core.repository.WorkflowAuditEventRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -15,10 +16,16 @@ public class WorkflowAuditTracker {
 
     private final WorkflowAuditEventRepository repository;
     private final ObjectMapper objectMapper;
+    private WorkflowEventPublisher workflowEventPublisher = new NoOpWorkflowEventPublisher();
 
     public WorkflowAuditTracker(WorkflowAuditEventRepository repository, ObjectMapper objectMapper) {
         this.repository = repository;
         this.objectMapper = objectMapper;
+    }
+
+    @Autowired(required = false)
+    public void setWorkflowEventPublisher(WorkflowEventPublisher workflowEventPublisher) {
+        this.workflowEventPublisher = workflowEventPublisher == null ? new NoOpWorkflowEventPublisher() : workflowEventPublisher;
     }
 
     public void record(Workflow workflow, String eventType, String message) {
@@ -37,5 +44,6 @@ public class WorkflowAuditTracker {
             event.setMetadata("{}");
         }
         repository.save(event);
+        workflowEventPublisher.publish(eventType, workflow, taskId, message, metadata == null ? Map.of() : metadata);
     }
 }

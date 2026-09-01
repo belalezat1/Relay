@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, ObjectMapper.class})
+@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, NoOpWorkflowEventPublisher.class, ObjectMapper.class})
 @org.springframework.test.context.ContextConfiguration(classes = WorkflowOrchestratorTest.TestConfiguration.class)
 class WorkflowOrchestratorTest {
 
