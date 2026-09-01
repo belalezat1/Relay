@@ -24,7 +24,8 @@ class WorkflowWorkerTest {
 
         WorkflowRepository workflowRepository = createRepository(workflow);
         RecordingWorkflowOrchestrator workflowOrchestrator = new RecordingWorkflowOrchestrator(workflow.getId());
-        WorkflowWorker worker = new WorkflowWorker(workflowRepository, workflowOrchestrator);
+        WorkflowDispatchQueue queue = new WorkflowDispatchQueue();
+        WorkflowWorker worker = new WorkflowWorker(workflowRepository, workflowOrchestrator, queue, 1);
 
         CompletableFuture<Void> firstRun = CompletableFuture.runAsync(worker::processPendingWorkflows);
         CompletableFuture<Void> secondRun = CompletableFuture.runAsync(worker::processPendingWorkflows);
