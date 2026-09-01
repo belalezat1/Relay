@@ -22,6 +22,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -162,5 +163,18 @@ class WorkflowOrchestratorTest {
 
         workflow = workflowOrchestrator.cancelWorkflow(workflow.getId());
         assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.CANCELLED);
+    }
+
+    @Test
+    void failsWorkflowWhenTimeoutIsExceeded() {
+        Workflow workflow = new Workflow();
+        workflow.setStatus(WorkflowStatus.RUNNING);
+        workflow.setCreatedAt(Instant.now().minusSeconds(30));
+        workflow.setTimeoutSeconds(1);
+        workflow = workflowRepository.saveAndFlush(workflow);
+
+        Workflow updated = workflowOrchestrator.executeWorkflow(workflow.getId());
+
+        assertThat(updated.getStatus()).isEqualTo(WorkflowStatus.FAILED);
     }
 }

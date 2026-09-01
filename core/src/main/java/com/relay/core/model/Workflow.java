@@ -37,6 +37,12 @@ public class Workflow {
     @Column(name = "environment")
     private String environment;
 
+    @Column(name = "timeout_seconds")
+    private Integer timeoutSeconds;
+
+    @Column(name = "sla_threshold_seconds")
+    private Integer slaThresholdSeconds;
+
     @Column(name = "version", nullable = false)
     private Integer version = 1;
 
@@ -81,6 +87,22 @@ public class Workflow {
 
     public void setEnvironment(String environment) {
         this.environment = environment;
+    }
+
+    public Integer getTimeoutSeconds() {
+        return timeoutSeconds == null ? 0 : timeoutSeconds;
+    }
+
+    public void setTimeoutSeconds(Integer timeoutSeconds) {
+        this.timeoutSeconds = timeoutSeconds == null ? 0 : timeoutSeconds;
+    }
+
+    public Integer getSlaThresholdSeconds() {
+        return slaThresholdSeconds == null ? 0 : slaThresholdSeconds;
+    }
+
+    public void setSlaThresholdSeconds(Integer slaThresholdSeconds) {
+        this.slaThresholdSeconds = slaThresholdSeconds == null ? 0 : slaThresholdSeconds;
     }
 
     public Integer getVersion() {

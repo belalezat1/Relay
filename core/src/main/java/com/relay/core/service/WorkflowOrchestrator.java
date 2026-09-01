@@ -128,6 +128,16 @@ public class WorkflowOrchestrator {
         if (workflow.getStatus() == WorkflowStatus.PAUSED) {
             return workflow;
         }
+        if (workflow.getStatus() == WorkflowStatus.FAILED) {
+            return workflow;
+        }
+
+        if (hasExceededTimeout(workflow)) {
+            workflow.setStatus(WorkflowStatus.FAILED);
+            workflowRepository.save(workflow);
+            workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow timed out", Map.of("status", workflow.getStatus().name(), "timeoutSeconds", workflow.getTimeoutSeconds()));
+            return workflowRepository.findById(workflowId).orElseThrow();
+        }
 
         workflow.setStatus(WorkflowStatus.RUNNING);
         workflowRepository.save(workflow);
@@ -137,6 +147,12 @@ public class WorkflowOrchestrator {
             workflow = workflowRepository.findById(workflowId).orElseThrow();
             if (workflow.getStatus() == WorkflowStatus.CANCELLED || workflow.getStatus() == WorkflowStatus.PAUSED) {
                 return workflow;
+            }
+            if (hasExceededTimeout(workflow)) {
+                workflow.setStatus(WorkflowStatus.FAILED);
+                workflowRepository.save(workflow);
+                workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow timed out", Map.of("status", workflow.getStatus().name(), "timeoutSeconds", workflow.getTimeoutSeconds()));
+                return workflowRepository.findById(workflowId).orElseThrow();
             }
 
             List<Task> readyTasks = dependencyGraphResolver.getReadyTasks(workflow);
@@ -255,6 +271,17 @@ public class WorkflowOrchestrator {
             }
         }
         return !workflow.getTasks().isEmpty();
+    }
+
+    private boolean hasExceededTimeout(Workflow workflow) {
+        if (workflow == null || workflow.getTimeoutSeconds() == null || workflow.getTimeoutSeconds() <= 0) {
+            return false;
+        }
+        if (workflow.getCreatedAt() == null) {
+            return false;
+        }
+        Instant timeoutInstant = workflow.getCreatedAt().plusSeconds(workflow.getTimeoutSeconds());
+        return Instant.now().isAfter(timeoutInstant);
     }
 
     private String resolveReferenceId(TaskDefinition definition, int index) {

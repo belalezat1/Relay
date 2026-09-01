@@ -13,6 +13,8 @@ public class WorkflowResponse {
     private WorkflowStatus status;
     private String owner;
     private String environment;
+    private Integer timeoutSeconds;
+    private Integer slaThresholdSeconds;
     private Integer version = 1;
     private Instant createdAt;
     private Instant updatedAt;
@@ -53,6 +55,22 @@ public class WorkflowResponse {
 
     public void setEnvironment(String environment) {
         this.environment = environment;
+    }
+
+    public Integer getTimeoutSeconds() {
+        return timeoutSeconds == null ? 0 : timeoutSeconds;
+    }
+
+    public void setTimeoutSeconds(Integer timeoutSeconds) {
+        this.timeoutSeconds = timeoutSeconds == null ? 0 : timeoutSeconds;
+    }
+
+    public Integer getSlaThresholdSeconds() {
+        return slaThresholdSeconds == null ? 0 : slaThresholdSeconds;
+    }
+
+    public void setSlaThresholdSeconds(Integer slaThresholdSeconds) {
+        this.slaThresholdSeconds = slaThresholdSeconds == null ? 0 : slaThresholdSeconds;
     }
 
     public Integer getVersion() {

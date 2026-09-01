@@ -125,6 +125,8 @@ public class WorkflowController {
         Workflow workflow = workflowOrchestrator.createAndExecuteWorkflow(definitions);
         workflow.setOwner(request.getOwner());
         workflow.setEnvironment(request.getEnvironment());
+        workflow.setTimeoutSeconds(request.getTimeoutSeconds());
+        workflow.setSlaThresholdSeconds(request.getSlaThresholdSeconds());
         workflow = workflowRepository.save(workflow);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(workflow, null));
     }
@@ -164,6 +166,8 @@ public class WorkflowController {
         response.setStatus(workflow.getStatus());
         response.setOwner(workflow.getOwner());
         response.setEnvironment(workflow.getEnvironment());
+        response.setTimeoutSeconds(workflow.getTimeoutSeconds());
+        response.setSlaThresholdSeconds(workflow.getSlaThresholdSeconds());
         response.setVersion(workflow.getVersion());
         response.setCreatedAt(workflow.getCreatedAt());
         response.setUpdatedAt(workflow.getUpdatedAt());
