@@ -20,6 +20,7 @@ public class TaskResponse {
     private int attemptCount;
     private Instant createdAt;
     private Instant updatedAt;
+    private long durationMs;
     private String errorMessage;
 
     public UUID getId() {
@@ -92,6 +93,14 @@ public class TaskResponse {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public long getDurationMs() {
+        return durationMs;
+    }
+
+    public void setDurationMs(long durationMs) {
+        this.durationMs = durationMs;
     }
 
     public String getErrorMessage() {

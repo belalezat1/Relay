@@ -13,6 +13,11 @@ public class WorkflowResponse {
     private WorkflowStatus status;
     private Instant createdAt;
     private Instant updatedAt;
+    private long durationMs;
+    private int totalTasks;
+    private int succeededTasks;
+    private int failedTasks;
+    private String lastError;
     private List<TaskResponse> tasks = new ArrayList<>();
 
     public UUID getId() {
@@ -45,6 +50,46 @@ public class WorkflowResponse {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public long getDurationMs() {
+        return durationMs;
+    }
+
+    public void setDurationMs(long durationMs) {
+        this.durationMs = durationMs;
+    }
+
+    public int getTotalTasks() {
+        return totalTasks;
+    }
+
+    public void setTotalTasks(int totalTasks) {
+        this.totalTasks = totalTasks;
+    }
+
+    public int getSucceededTasks() {
+        return succeededTasks;
+    }
+
+    public void setSucceededTasks(int succeededTasks) {
+        this.succeededTasks = succeededTasks;
+    }
+
+    public int getFailedTasks() {
+        return failedTasks;
+    }
+
+    public void setFailedTasks(int failedTasks) {
+        this.failedTasks = failedTasks;
+    }
+
+    public String getLastError() {
+        return lastError;
+    }
+
+    public void setLastError(String lastError) {
+        this.lastError = lastError;
     }
 
     public List<TaskResponse> getTasks() {

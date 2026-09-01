@@ -10,4 +10,6 @@ import java.util.UUID;
 @Repository
 public interface TaskAttemptRepository extends JpaRepository<TaskAttempt, UUID> {
     List<TaskAttempt> findByTask_Id(UUID taskId);
+
+    List<TaskAttempt> findByTask_IdOrderByCreatedAtDesc(UUID taskId);
 }
