@@ -39,6 +39,18 @@ public class Task {
     @Column(name = "type", nullable = false)
     private String type;
 
+    @Column(name = "adapter_type", nullable = false)
+    private String adapterType = "inline";
+
+    @Column(name = "owner")
+    private String owner;
+
+    @Column(name = "environment")
+    private String environment;
+
+    @Column(name = "version", nullable = false)
+    private Integer version = 1;
+
     @Column(name = "payload", nullable = false)
     private String payload = "{}";
 
@@ -89,6 +101,38 @@ public class Task {
 
     public void setType(String type) {
         this.type = type;
+    }
+
+    public String getAdapterType() {
+        return adapterType == null || adapterType.isBlank() ? "inline" : adapterType;
+    }
+
+    public void setAdapterType(String adapterType) {
+        this.adapterType = adapterType == null || adapterType.isBlank() ? "inline" : adapterType;
+    }
+
+    public String getOwner() {
+        return owner;
+    }
+
+    public void setOwner(String owner) {
+        this.owner = owner;
+    }
+
+    public String getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(String environment) {
+        this.environment = environment;
+    }
+
+    public Integer getVersion() {
+        return version == null ? 1 : version;
+    }
+
+    public void setVersion(Integer version) {
+        this.version = version == null ? 1 : version;
     }
 
     public String getPayload() {

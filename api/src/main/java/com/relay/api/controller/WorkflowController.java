@@ -101,9 +101,21 @@ public class WorkflowController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Task id cannot be blank");
             }
 
+            String adapterType = taskRequest.getAdapterType();
+            if (adapterType == null || adapterType.isBlank()) {
+                adapterType = "inline";
+            }
+            if (!isSupportedAdapterType(adapterType)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported adapter type: " + adapterType);
+            }
+
             TaskDefinition definition = new TaskDefinition();
             definition.setId(taskRequest.getId());
             definition.setType(taskRequest.getType().trim());
+            definition.setAdapterType(adapterType.trim());
+            definition.setOwner(taskRequest.getOwner());
+            definition.setEnvironment(taskRequest.getEnvironment());
+            definition.setVersion(taskRequest.getVersion());
             definition.setIdempotencyKey(taskRequest.getIdempotencyKey());
             definition.setPayload(taskRequest.getPayload());
             definition.setDependsOn(taskRequest.getDependsOn());
@@ -111,6 +123,9 @@ public class WorkflowController {
         }
 
         Workflow workflow = workflowOrchestrator.createAndExecuteWorkflow(definitions);
+        workflow.setOwner(request.getOwner());
+        workflow.setEnvironment(request.getEnvironment());
+        workflow = workflowRepository.save(workflow);
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(workflow, null));
     }
 
@@ -118,6 +133,24 @@ public class WorkflowController {
     public ResponseEntity<WorkflowResponse> getWorkflow(@PathVariable UUID workflowId) {
         Workflow workflow = workflowRepository.findById(workflowId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Workflow not found: " + workflowId));
+        return ResponseEntity.ok(toResponse(workflow, null));
+    }
+
+    @PostMapping("/{workflowId}/pause")
+    public ResponseEntity<WorkflowResponse> pauseWorkflow(@PathVariable UUID workflowId) {
+        Workflow workflow = workflowOrchestrator.pauseWorkflow(workflowId);
+        return ResponseEntity.ok(toResponse(workflow, null));
+    }
+
+    @PostMapping("/{workflowId}/resume")
+    public ResponseEntity<WorkflowResponse> resumeWorkflow(@PathVariable UUID workflowId) {
+        Workflow workflow = workflowOrchestrator.resumeWorkflow(workflowId);
+        return ResponseEntity.ok(toResponse(workflow, null));
+    }
+
+    @PostMapping("/{workflowId}/cancel")
+    public ResponseEntity<WorkflowResponse> cancelWorkflow(@PathVariable UUID workflowId) {
+        Workflow workflow = workflowOrchestrator.cancelWorkflow(workflowId);
         return ResponseEntity.ok(toResponse(workflow, null));
     }
 
@@ -129,6 +162,9 @@ public class WorkflowController {
         WorkflowResponse response = new WorkflowResponse();
         response.setId(workflow.getId());
         response.setStatus(workflow.getStatus());
+        response.setOwner(workflow.getOwner());
+        response.setEnvironment(workflow.getEnvironment());
+        response.setVersion(workflow.getVersion());
         response.setCreatedAt(workflow.getCreatedAt());
         response.setUpdatedAt(workflow.getUpdatedAt());
         if (workflow.getCreatedAt() != null && workflow.getUpdatedAt() != null) {
@@ -150,6 +186,10 @@ public class WorkflowController {
             TaskResponse taskResponse = new TaskResponse();
             taskResponse.setId(task.getId());
             taskResponse.setType(task.getType());
+            taskResponse.setAdapterType(task.getAdapterType());
+            taskResponse.setOwner(task.getOwner());
+            taskResponse.setEnvironment(task.getEnvironment());
+            taskResponse.setVersion(task.getVersion());
             taskResponse.setStatus(task.getStatus());
             taskResponse.setAttemptCount(task.getAttemptCount() == null ? 0 : task.getAttemptCount());
             taskResponse.setCreatedAt(task.getCreatedAt());
@@ -185,6 +225,24 @@ public class WorkflowController {
         response.setFailedTasks(failed);
         response.setLastError(lastError);
         return response;
+    }
+
+    private boolean isSupportedAdapterType(String adapterType) {
+        if (adapterType == null || adapterType.isBlank()) {
+            return false;
+        }
+        String normalized = adapterType.trim().toLowerCase();
+        return normalized.equals("inline")
+            || normalized.equals("http")
+            || normalized.equals("db")
+            || normalized.equals("database")
+            || normalized.equals("success")
+            || normalized.equals("charge_card")
+            || normalized.equals("reserve_inventory")
+            || normalized.equals("send_email")
+            || normalized.equals("generate_report")
+            || normalized.equals("fail")
+            || normalized.equals("failing_task");
     }
 
     private Map<String, Object> parsePayload(String payload) {

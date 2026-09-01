@@ -39,6 +39,9 @@ public class WorkflowWorker {
     public void processPendingWorkflows() {
         List<Workflow> workflows = workflowRepository.findAllByOrderByCreatedAtDesc();
         for (Workflow workflow : workflows) {
+            if (workflow.getStatus() == null) {
+                continue;
+            }
             if ((workflow.getStatus() == WorkflowStatus.PENDING || workflow.getStatus() == WorkflowStatus.RUNNING)
                 && !inFlightWorkflows.contains(workflow.getId())) {
                 dispatchQueue.tryQueue(workflow.getId());

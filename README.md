@@ -32,22 +32,32 @@ Prerequisites:
 - Maven 3.9+
 - Docker Desktop or Docker Engine
 
-1. Start PostgreSQL:
+1. Copy the environment template if needed:
    ```bash
-   docker compose up -d
+   cp .env.example .env
    ```
 
-2. Run the test suite:
+2. Start PostgreSQL:
+   ```bash
+   docker compose up -d postgres
+   ```
+
+3. Run the test suite:
    ```bash
    mvn test
    ```
 
-3. Start the API:
+4. Start the API with the default development profile:
    ```bash
-   mvn -pl api spring-boot:run
+   APP_ENV=dev DB_HOST=localhost DB_PORT=5432 DB_NAME=relay_dev DB_USERNAME=relay DB_PASSWORD=relay_dev APP_PORT=8080 mvn -pl api spring-boot:run
    ```
 
-4. Submit a workflow through the API:
+5. Or start the app through Docker Compose:
+   ```bash
+   docker compose --profile app up -d --build
+   ```
+
+6. Submit a workflow through the API:
    ```bash
    curl -X POST http://localhost:8080/api/workflows \
      -H "Content-Type: application/json" \
@@ -58,6 +68,20 @@ Prerequisites:
        ]
      }'
    ```
+
+## Environment and deployment readiness
+Relay now supports environment-specific configuration profiles and deployable container settings without changing the core runtime architecture.
+
+- `dev` profile: local development defaults with debug logging and local database configuration.
+- `prod` profile: production-oriented defaults with more conservative logging.
+- `docker-compose.yml`: runs PostgreSQL and optionally the API in a local containerized setup.
+- `.env.example`: centralizes deployment variables for the runtime and database.
+
+Key runtime variables:
+- `APP_ENV` — selects the active Spring profile (`dev` or `prod`)
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` — database connection settings
+- `APP_PORT` — HTTP port for the API
+- `WORKER_MAX_CONCURRENCY`, `WORKER_POLL_DELAY` — worker scheduling controls
 
 ## Architecture summary
 - `core` owns the domain model and orchestration rules.

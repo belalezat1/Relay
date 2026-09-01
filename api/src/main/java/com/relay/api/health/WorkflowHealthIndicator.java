@@ -18,8 +18,12 @@ public class WorkflowHealthIndicator implements HealthIndicator {
     public Health health() {
         try {
             long workflowCount = workflowRepository.count();
+            var totals = workflowRepository.findAll().stream()
+                .collect(java.util.stream.Collectors.groupingBy(com.relay.core.model.Workflow::getStatus, java.util.stream.Collectors.counting()));
+
             return Health.up()
                 .withDetail("workflowCount", workflowCount)
+                .withDetail("statusCounts", totals)
                 .withDetail("persistence", "postgresql")
                 .build();
         } catch (Exception ex) {

@@ -11,6 +11,9 @@ public class WorkflowResponse {
 
     private UUID id;
     private WorkflowStatus status;
+    private String owner;
+    private String environment;
+    private Integer version = 1;
     private Instant createdAt;
     private Instant updatedAt;
     private long durationMs;
@@ -34,6 +37,30 @@ public class WorkflowResponse {
 
     public void setStatus(WorkflowStatus status) {
         this.status = status;
+    }
+
+    public String getOwner() {
+        return owner;
+    }
+
+    public void setOwner(String owner) {
+        this.owner = owner;
+    }
+
+    public String getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(String environment) {
+        this.environment = environment;
+    }
+
+    public Integer getVersion() {
+        return version == null ? 1 : version;
+    }
+
+    public void setVersion(Integer version) {
+        this.version = version == null ? 1 : version;
     }
 
     public Instant getCreatedAt() {

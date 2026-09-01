@@ -31,6 +31,15 @@ public class Workflow {
     @Column(name = "status", nullable = false)
     private WorkflowStatus status = WorkflowStatus.PENDING;
 
+    @Column(name = "owner")
+    private String owner;
+
+    @Column(name = "environment")
+    private String environment;
+
+    @Column(name = "version", nullable = false)
+    private Integer version = 1;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -56,6 +65,30 @@ public class Workflow {
 
     public void setStatus(WorkflowStatus status) {
         this.status = status;
+    }
+
+    public String getOwner() {
+        return owner;
+    }
+
+    public void setOwner(String owner) {
+        this.owner = owner;
+    }
+
+    public String getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(String environment) {
+        this.environment = environment;
+    }
+
+    public Integer getVersion() {
+        return version == null ? 1 : version;
+    }
+
+    public void setVersion(Integer version) {
+        this.version = version == null ? 1 : version;
     }
 
     public Instant getCreatedAt() {

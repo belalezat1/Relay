@@ -5,18 +5,41 @@ services:
     image: postgres:15-alpine
     container_name: relay_postgres
     environment:
-      POSTGRES_DB: relay_dev
-      POSTGRES_USER: relay
-      POSTGRES_PASSWORD: relay_dev
+      POSTGRES_DB: ${POSTGRES_DB:-relay_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-relay}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relay_dev}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U relay"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-relay} -d ${POSTGRES_DB:-relay_dev}"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  relay-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    image: relay-api:local
+    container_name: relay_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: dev
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-relay_dev}
+      DB_USERNAME: ${POSTGRES_USER:-relay}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-relay_dev}
+      APP_PORT: ${APP_PORT:-8080}
+      WORKER_MAX_CONCURRENCY: ${WORKER_MAX_CONCURRENCY:-4}
+      WORKER_POLL_DELAY: ${WORKER_POLL_DELAY:-5000}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    profiles: ["app"]
 
 volumes:
   postgres_data:

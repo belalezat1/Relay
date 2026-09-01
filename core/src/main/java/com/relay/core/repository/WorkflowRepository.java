@@ -12,5 +12,7 @@ import java.util.UUID;
 public interface WorkflowRepository extends JpaRepository<Workflow, UUID> {
     List<Workflow> findByStatus(WorkflowStatus status);
 
+    Long countByStatus(WorkflowStatus status);
+
     List<Workflow> findAllByOrderByCreatedAtDesc();
 }

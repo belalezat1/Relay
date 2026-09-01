@@ -13,6 +13,10 @@ public class TaskResponse {
 
     private UUID id;
     private String type;
+    private String adapterType = "inline";
+    private String owner;
+    private String environment;
+    private Integer version = 1;
     private TaskStatus status;
     private TaskResult result;
     private Map<String, Object> payload;
@@ -37,6 +41,38 @@ public class TaskResponse {
 
     public void setType(String type) {
         this.type = type;
+    }
+
+    public String getAdapterType() {
+        return adapterType == null || adapterType.isBlank() ? "inline" : adapterType;
+    }
+
+    public void setAdapterType(String adapterType) {
+        this.adapterType = adapterType == null || adapterType.isBlank() ? "inline" : adapterType;
+    }
+
+    public String getOwner() {
+        return owner;
+    }
+
+    public void setOwner(String owner) {
+        this.owner = owner;
+    }
+
+    public String getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(String environment) {
+        this.environment = environment;
+    }
+
+    public Integer getVersion() {
+        return version == null ? 1 : version;
+    }
+
+    public void setVersion(Integer version) {
+        this.version = version == null ? 1 : version;
     }
 
     public TaskStatus getStatus() {

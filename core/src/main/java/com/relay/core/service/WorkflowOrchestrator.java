@@ -32,6 +32,7 @@ public class WorkflowOrchestrator {
     private final TaskExecutionRegistry taskExecutionRegistry;
     private final RetryPolicy retryPolicy;
     private final ObjectMapper objectMapper;
+    private final WorkflowAuditTracker workflowAuditTracker;
 
     public WorkflowOrchestrator(
         WorkflowRepository workflowRepository,
@@ -40,7 +41,8 @@ public class WorkflowOrchestrator {
         DependencyGraphResolver dependencyGraphResolver,
         TaskExecutionRegistry taskExecutionRegistry,
         RetryPolicy retryPolicy,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        WorkflowAuditTracker workflowAuditTracker
     ) {
         this.workflowRepository = workflowRepository;
         this.taskRepository = taskRepository;
@@ -49,6 +51,7 @@ public class WorkflowOrchestrator {
         this.taskExecutionRegistry = taskExecutionRegistry;
         this.retryPolicy = retryPolicy;
         this.objectMapper = objectMapper;
+        this.workflowAuditTracker = workflowAuditTracker;
     }
 
     @Transactional
@@ -59,7 +62,9 @@ public class WorkflowOrchestrator {
 
         Workflow workflow = new Workflow();
         workflow.setStatus(WorkflowStatus.RUNNING);
+        workflow.setVersion(1);
         workflowRepository.save(workflow);
+        workflowAuditTracker.record(workflow, null, "workflow.created", "Workflow created", Map.of("taskCount", definitions.size(), "version", workflow.getVersion()));
 
         Map<String, Task> taskMap = new HashMap<>();
         for (int i = 0; i < definitions.size(); i++) {
@@ -69,6 +74,10 @@ public class WorkflowOrchestrator {
             task.setWorkflow(workflow);
             workflow.addTask(task);
             task.setType(definition.getType());
+            task.setAdapterType(definition.getAdapterType());
+            task.setOwner(definition.getOwner());
+            task.setEnvironment(definition.getEnvironment());
+            task.setVersion(definition.getVersion());
             task.setPayload(toJson(definition.getPayload()));
             task.setStatus(TaskStatus.PENDING);
             task.setDependsOn(new UUID[0]);
@@ -78,6 +87,7 @@ public class WorkflowOrchestrator {
                 : definition.getIdempotencyKey();
             task.setIdempotencyKey(idempotencyKey);
             taskRepository.save(task);
+            workflowAuditTracker.record(workflow, task.getId(), "task.created", "Task created", Map.of("taskType", task.getType(), "adapterType", task.getAdapterType(), "version", task.getVersion(), "idempotencyKey", idempotencyKey));
             taskMap.put(referenceId, task);
         }
 
@@ -112,16 +122,29 @@ public class WorkflowOrchestrator {
         Workflow workflow = workflowRepository.findById(workflowId)
             .orElseThrow(() -> new IllegalArgumentException("Workflow not found: " + workflowId));
 
+        if (workflow.getStatus() == WorkflowStatus.CANCELLED) {
+            return workflow;
+        }
+        if (workflow.getStatus() == WorkflowStatus.PAUSED) {
+            return workflow;
+        }
+
         workflow.setStatus(WorkflowStatus.RUNNING);
         workflowRepository.save(workflow);
+        workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow started execution", Map.of("status", workflow.getStatus().name()));
 
         while (true) {
             workflow = workflowRepository.findById(workflowId).orElseThrow();
+            if (workflow.getStatus() == WorkflowStatus.CANCELLED || workflow.getStatus() == WorkflowStatus.PAUSED) {
+                return workflow;
+            }
+
             List<Task> readyTasks = dependencyGraphResolver.getReadyTasks(workflow);
 
             if (readyTasks.isEmpty()) {
                 workflow.setStatus(allTasksSucceeded(workflow) ? WorkflowStatus.COMPLETED : WorkflowStatus.FAILED);
                 workflowRepository.save(workflow);
+                workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow completed execution", Map.of("status", workflow.getStatus().name(), "tasks", workflow.getTasks().size()));
                 return workflowRepository.findById(workflowId).orElseThrow();
             }
 
@@ -137,7 +160,7 @@ public class WorkflowOrchestrator {
 
                 boolean shouldRetry = false;
                 try {
-                    TaskExecutor taskExecutor = taskExecutionRegistry.resolve(task.getType());
+                    TaskExecutor taskExecutor = taskExecutionRegistry.resolve(task);
                     TaskResult result = taskExecutor.execute(task);
                     attempt.setResult(result);
                     attempt.setFinishedAt(Instant.now());
@@ -169,14 +192,60 @@ public class WorkflowOrchestrator {
 
                 taskRepository.save(task);
                 taskAttemptRepository.save(attempt);
+                workflowAuditTracker.record(workflow, task.getId(), "task.state.changed", "Task state updated", Map.of(
+                    "taskType", task.getType(),
+                    "status", task.getStatus().name(),
+                    "attemptCount", task.getAttemptCount(),
+                    "version", task.getVersion()
+                ));
 
                 if (task.getStatus() == TaskStatus.DEAD_LETTERED) {
                     workflow.setStatus(WorkflowStatus.FAILED);
                     workflowRepository.save(workflow);
+                    workflowAuditTracker.record(workflow, task.getId(), "workflow.state.changed", "Workflow failed due to dead-lettered task", Map.of("status", workflow.getStatus().name(), "taskType", task.getType()));
                     return workflowRepository.findById(workflowId).orElseThrow();
                 }
             }
         }
+    }
+
+    @Transactional
+    public Workflow pauseWorkflow(UUID workflowId) {
+        Workflow workflow = workflowRepository.findById(workflowId)
+            .orElseThrow(() -> new IllegalArgumentException("Workflow not found: " + workflowId));
+        if (workflow.getStatus() == WorkflowStatus.COMPLETED || workflow.getStatus() == WorkflowStatus.FAILED || workflow.getStatus() == WorkflowStatus.CANCELLED) {
+            throw new IllegalStateException("Workflow cannot be paused in status " + workflow.getStatus());
+        }
+        workflow.setStatus(WorkflowStatus.PAUSED);
+        workflowRepository.save(workflow);
+        workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow paused", Map.of("status", workflow.getStatus().name()));
+        return workflowRepository.findById(workflowId).orElseThrow();
+    }
+
+    @Transactional
+    public Workflow resumeWorkflow(UUID workflowId) {
+        Workflow workflow = workflowRepository.findById(workflowId)
+            .orElseThrow(() -> new IllegalArgumentException("Workflow not found: " + workflowId));
+        if (workflow.getStatus() != WorkflowStatus.PAUSED) {
+            throw new IllegalStateException("Workflow must be paused before it can be resumed");
+        }
+        workflow.setStatus(WorkflowStatus.PENDING);
+        workflowRepository.save(workflow);
+        workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow resumed", Map.of("status", workflow.getStatus().name()));
+        return workflowRepository.findById(workflowId).orElseThrow();
+    }
+
+    @Transactional
+    public Workflow cancelWorkflow(UUID workflowId) {
+        Workflow workflow = workflowRepository.findById(workflowId)
+            .orElseThrow(() -> new IllegalArgumentException("Workflow not found: " + workflowId));
+        if (workflow.getStatus() == WorkflowStatus.COMPLETED || workflow.getStatus() == WorkflowStatus.FAILED || workflow.getStatus() == WorkflowStatus.CANCELLED) {
+            return workflow;
+        }
+        workflow.setStatus(WorkflowStatus.CANCELLED);
+        workflowRepository.save(workflow);
+        workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow cancelled", Map.of("status", workflow.getStatus().name()));
+        return workflowRepository.findById(workflowId).orElseThrow();
     }
 
     private boolean allTasksSucceeded(Workflow workflow) {

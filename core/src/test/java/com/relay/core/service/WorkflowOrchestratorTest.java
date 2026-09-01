@@ -6,9 +6,11 @@ import com.relay.core.model.TaskAttempt;
 import com.relay.core.model.TaskDefinition;
 import com.relay.core.model.TaskStatus;
 import com.relay.core.model.Workflow;
+import com.relay.core.model.WorkflowAuditEvent;
 import com.relay.core.model.WorkflowStatus;
 import com.relay.core.repository.TaskAttemptRepository;
 import com.relay.core.repository.TaskRepository;
+import com.relay.core.repository.WorkflowAuditEventRepository;
 import com.relay.core.repository.WorkflowRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,14 +29,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, ObjectMapper.class})
+@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, ObjectMapper.class})
 @org.springframework.test.context.ContextConfiguration(classes = WorkflowOrchestratorTest.TestConfiguration.class)
 class WorkflowOrchestratorTest {
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
-    @EnableJpaRepositories(basePackageClasses = {WorkflowRepository.class, TaskRepository.class, TaskAttemptRepository.class})
-    @EntityScan(basePackageClasses = {Workflow.class, Task.class, TaskAttempt.class})
+    @EnableJpaRepositories(basePackageClasses = {WorkflowRepository.class, TaskRepository.class, TaskAttemptRepository.class, WorkflowAuditEventRepository.class})
+    @EntityScan(basePackageClasses = {Workflow.class, Task.class, TaskAttempt.class, WorkflowAuditEvent.class})
     static class TestConfiguration {
     }
 
@@ -144,5 +146,21 @@ class WorkflowOrchestratorTest {
         Task task = taskRepository.findByWorkflow_Id(workflow.getId()).getFirst();
         assertThat(task.getStatus()).isEqualTo(TaskStatus.DEAD_LETTERED);
         assertThat(task.getAttemptCount()).isEqualTo(RetryPolicy.DEFAULT_MAX_ATTEMPTS);
+    }
+
+    @Test
+    void pausesResumesAndCancelsWorkflow() {
+        Workflow workflow = new Workflow();
+        workflow.setStatus(WorkflowStatus.PENDING);
+        workflow = workflowRepository.saveAndFlush(workflow);
+
+        workflow = workflowOrchestrator.pauseWorkflow(workflow.getId());
+        assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.PAUSED);
+
+        workflow = workflowOrchestrator.resumeWorkflow(workflow.getId());
+        assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.PENDING);
+
+        workflow = workflowOrchestrator.cancelWorkflow(workflow.getId());
+        assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.CANCELLED);
     }
 }
