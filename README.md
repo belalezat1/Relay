@@ -69,6 +69,13 @@ Prerequisites:
 - This repository keeps design and planning documents in a local `docs/` folder for personal working notes and does not treat them as source-controlled project artifacts.
 - The project is intentionally structured to support later phases such as distributed workers, retries, and queue-backed execution without reworking the data model.
 
+## Project roadmap
+- Phase I: project bootstrap and stable Java + Maven setup
+- Phase II: PostgreSQL-backed persistence and Flyway schema
+- Phase III: workflow orchestration, dependency resolution, and REST API
+- Phase IV: retry handling, worker execution loop, and dead-lettering
+- Phase V: operational hardening, queue-backed dispatch, and production-oriented APIs
+
 ## Next phases
 - Add richer workflow execution semantics and scheduling
 - Add dead-lettering and retry policies

@@ -2,6 +2,7 @@
 # Keep these files on the machine, but do not commit them.
 docs/
 plan.md
+.copilot/
 
 # Build outputs
 target/
@@ -31,10 +32,13 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Local runtime files
+# Local runtime and secrets
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.crt
 logs/
 *.log
 *.pid
@@ -43,6 +47,11 @@ logs/
 postgres_data/
 pgdata/
 volumes/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
 
 # Coverage / test reports
 coverage/
