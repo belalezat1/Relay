@@ -63,11 +63,21 @@ public class WorkflowController {
     @GetMapping
     public ResponseEntity<List<WorkflowResponse>> listWorkflows(
         @RequestParam(required = false) WorkflowStatus status,
-        @RequestParam(required = false) String taskType
+        @RequestParam(required = false) String taskType,
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size
     ) {
-        List<Workflow> workflows = status == null ? workflowRepository.findAll() : workflowRepository.findByStatus(status);
+        List<Workflow> workflows = status == null
+            ? workflowRepository.findAllByOrderByCreatedAtDesc()
+            : workflowRepository.findByStatus(status);
+
+        int pageSize = Math.max(1, Math.min(size, 100));
+        int fromIndex = Math.min(page * pageSize, workflows.size());
+        int toIndex = Math.min(fromIndex + pageSize, workflows.size());
+        List<Workflow> pageContent = workflows.subList(fromIndex, toIndex);
+
         List<WorkflowResponse> responses = new ArrayList<>();
-        for (Workflow workflow : workflows) {
+        for (Workflow workflow : pageContent) {
             WorkflowResponse response = toResponse(workflow, taskType);
             if (taskType == null || !response.getTasks().isEmpty()) {
                 responses.add(response);
@@ -78,11 +88,23 @@ public class WorkflowController {
 
     @PostMapping
     public ResponseEntity<WorkflowResponse> createWorkflow(@RequestBody WorkflowSubmissionRequest request) {
+        if (request == null || request.getTasks() == null || request.getTasks().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Workflow must include at least one task");
+        }
+
         List<TaskDefinition> definitions = new ArrayList<>();
         for (TaskRequest taskRequest : request.getTasks()) {
+            if (taskRequest == null || taskRequest.getType() == null || taskRequest.getType().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Each task must include a type");
+            }
+            if (taskRequest.getId() != null && taskRequest.getId().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Task id cannot be blank");
+            }
+
             TaskDefinition definition = new TaskDefinition();
             definition.setId(taskRequest.getId());
-            definition.setType(taskRequest.getType());
+            definition.setType(taskRequest.getType().trim());
+            definition.setIdempotencyKey(taskRequest.getIdempotencyKey());
             definition.setPayload(taskRequest.getPayload());
             definition.setDependsOn(taskRequest.getDependsOn());
             definitions.add(definition);
@@ -113,7 +135,7 @@ public class WorkflowController {
             response.setDurationMs(Duration.between(workflow.getCreatedAt(), workflow.getUpdatedAt()).toMillis());
         }
 
-        List<Task> tasks = taskRepository.findByWorkflow_Id(workflow.getId());
+        List<Task> tasks = taskRepository.findByWorkflow_IdOrderByCreatedAtAsc(workflow.getId());
         if (taskTypeFilter != null && !taskTypeFilter.isBlank()) {
             tasks = tasks.stream()
                 .filter(task -> taskTypeFilter.equalsIgnoreCase(task.getType()))

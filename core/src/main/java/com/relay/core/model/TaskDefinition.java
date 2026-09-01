@@ -9,6 +9,7 @@ public class TaskDefinition {
 
     private String id;
     private String type;
+    private String idempotencyKey;
     private Map<String, Object> payload = new HashMap<>();
     private List<String> dependsOn = new ArrayList<>();
 
@@ -26,6 +27,14 @@ public class TaskDefinition {
 
     public void setType(String type) {
         this.type = type;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
     }
 
     public Map<String, Object> getPayload() {

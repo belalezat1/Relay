@@ -73,7 +73,10 @@ public class WorkflowOrchestrator {
             task.setStatus(TaskStatus.PENDING);
             task.setDependsOn(new UUID[0]);
             task.setAttemptCount(0);
-            task.setIdempotencyKey(UUID.randomUUID().toString());
+            String idempotencyKey = definition.getIdempotencyKey() == null || definition.getIdempotencyKey().isBlank()
+                ? UUID.randomUUID().toString()
+                : definition.getIdempotencyKey();
+            task.setIdempotencyKey(idempotencyKey);
             taskRepository.save(task);
             taskMap.put(referenceId, task);
         }

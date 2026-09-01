@@ -11,4 +11,6 @@ import java.util.UUID;
 @Repository
 public interface WorkflowRepository extends JpaRepository<Workflow, UUID> {
     List<Workflow> findByStatus(WorkflowStatus status);
+
+    List<Workflow> findAllByOrderByCreatedAtDesc();
 }

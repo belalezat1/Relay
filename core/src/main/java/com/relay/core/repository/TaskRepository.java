@@ -12,6 +12,8 @@ import java.util.UUID;
 public interface TaskRepository extends JpaRepository<Task, UUID> {
     List<Task> findByWorkflow_Id(UUID workflowId);
 
+    List<Task> findByWorkflow_IdOrderByCreatedAtAsc(UUID workflowId);
+
     List<Task> findByWorkflow_IdAndStatus(UUID workflowId, TaskStatus status);
 
     List<Task> findByStatus(TaskStatus status);
