@@ -8,10 +8,13 @@ import com.relay.core.model.TaskStatus;
 import com.relay.core.model.Workflow;
 import com.relay.core.model.WorkflowAuditEvent;
 import com.relay.core.model.WorkflowStatus;
+import com.relay.core.model.WorkflowTemplate;
+import com.relay.core.model.WorkflowTemplateRequest;
 import com.relay.core.repository.TaskAttemptRepository;
 import com.relay.core.repository.TaskRepository;
 import com.relay.core.repository.WorkflowAuditEventRepository;
 import com.relay.core.repository.WorkflowRepository;
+import com.relay.core.repository.WorkflowTemplateRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -30,14 +33,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, NoOpWorkflowEventPublisher.class, ObjectMapper.class})
+@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, NoOpWorkflowEventPublisher.class, ObjectMapper.class, WorkflowTemplateService.class})
 @org.springframework.test.context.ContextConfiguration(classes = WorkflowOrchestratorTest.TestConfiguration.class)
 class WorkflowOrchestratorTest {
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
-    @EnableJpaRepositories(basePackageClasses = {WorkflowRepository.class, TaskRepository.class, TaskAttemptRepository.class, WorkflowAuditEventRepository.class})
-    @EntityScan(basePackageClasses = {Workflow.class, Task.class, TaskAttempt.class, WorkflowAuditEvent.class})
+    @EnableJpaRepositories(basePackageClasses = {WorkflowRepository.class, TaskRepository.class, TaskAttemptRepository.class, WorkflowAuditEventRepository.class, WorkflowTemplateRepository.class})
+    @EntityScan(basePackageClasses = {Workflow.class, Task.class, TaskAttempt.class, WorkflowAuditEvent.class, WorkflowTemplate.class})
     static class TestConfiguration {
     }
 
@@ -55,6 +58,43 @@ class WorkflowOrchestratorTest {
 
     @Autowired
     private TaskExecutionRegistry taskExecutionRegistry;
+
+    @Autowired
+    private WorkflowTemplateRepository workflowTemplateRepository;
+
+    @Autowired
+    private WorkflowTemplateService workflowTemplateService;
+
+    @Test
+    void createsWorkflowFromTemplate() {
+        WorkflowTemplateRequest request = new WorkflowTemplateRequest();
+        request.setName("data-sync");
+        request.setCategory("data");
+        request.setOwner("platform");
+        request.setEnvironment("dev");
+
+        TaskDefinition extract = new TaskDefinition();
+        extract.setId("extract");
+        extract.setType("success");
+        extract.setPayload(Map.of("source", "warehouse"));
+
+        TaskDefinition transform = new TaskDefinition();
+        transform.setId("transform");
+        transform.setType("success");
+        transform.setDependsOn(List.of("extract"));
+        transform.setPayload(Map.of("target", "normalized"));
+
+        request.setTasks(List.of(extract, transform));
+
+        WorkflowTemplate template = workflowTemplateService.createTemplate(request);
+        Workflow workflow = workflowTemplateService.submitTemplate(template.getId(), "ops", "prod", 120, 300);
+
+        assertThat(workflowTemplateRepository.findById(template.getId())).isPresent();
+        assertThat(workflow.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(workflow.getOwner()).isEqualTo("ops");
+        assertThat(workflow.getEnvironment()).isEqualTo("prod");
+        assertThat(taskRepository.findByWorkflow_Id(workflow.getId())).hasSize(2);
+    }
 
     @Test
     void executesSuccessfulWorkflow() {
