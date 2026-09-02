@@ -73,12 +73,25 @@ public class WorkflowController {
     public ResponseEntity<List<WorkflowResponse>> listWorkflows(
         @RequestParam(required = false) WorkflowStatus status,
         @RequestParam(required = false) String taskType,
+        @RequestParam(required = false) String owner,
+        @RequestParam(required = false) String environment,
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size
     ) {
         List<Workflow> workflows = status == null
             ? workflowRepository.findAllByOrderByCreatedAtDesc()
             : workflowRepository.findByStatus(status);
+
+        if (owner != null && !owner.isBlank()) {
+            workflows = workflows.stream()
+                .filter(workflow -> owner.equalsIgnoreCase(workflow.getOwner()))
+                .toList();
+        }
+        if (environment != null && !environment.isBlank()) {
+            workflows = workflows.stream()
+                .filter(workflow -> environment.equalsIgnoreCase(workflow.getEnvironment()))
+                .toList();
+        }
 
         int pageSize = Math.max(1, Math.min(size, 100));
         int fromIndex = Math.min(page * pageSize, workflows.size());
@@ -93,6 +106,44 @@ public class WorkflowController {
             }
         }
         return ResponseEntity.ok(responses);
+    }
+
+    @GetMapping("/summary")
+    public ResponseEntity<Map<String, Object>> getWorkflowSummary(
+        @RequestParam(required = false) String owner,
+        @RequestParam(required = false) String environment
+    ) {
+        List<Workflow> workflows = workflowRepository.findAllByOrderByCreatedAtDesc();
+        if (owner != null && !owner.isBlank()) {
+            workflows = workflows.stream()
+                .filter(workflow -> owner.equalsIgnoreCase(workflow.getOwner()))
+                .toList();
+        }
+        if (environment != null && !environment.isBlank()) {
+            workflows = workflows.stream()
+                .filter(workflow -> environment.equalsIgnoreCase(workflow.getEnvironment()))
+                .toList();
+        }
+
+        Map<String, Long> statusCounts = workflows.stream()
+            .collect(java.util.stream.Collectors.groupingBy(workflow -> workflow.getStatus().name(), java.util.stream.Collectors.counting()));
+        Map<String, Long> ownerCounts = workflows.stream()
+            .filter(workflow -> workflow.getOwner() != null && !workflow.getOwner().isBlank())
+            .collect(java.util.stream.Collectors.groupingBy(Workflow::getOwner, java.util.stream.Collectors.counting()));
+        Map<String, Long> environmentCounts = workflows.stream()
+            .filter(workflow -> workflow.getEnvironment() != null && !workflow.getEnvironment().isBlank())
+            .collect(java.util.stream.Collectors.groupingBy(Workflow::getEnvironment, java.util.stream.Collectors.counting()));
+
+        Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("totalWorkflows", workflows.size());
+        summary.put("statusCounts", statusCounts);
+        summary.put("ownerCounts", ownerCounts);
+        summary.put("environmentCounts", environmentCounts);
+        summary.put("filters", Map.of(
+            "owner", owner == null ? "all" : owner,
+            "environment", environment == null ? "all" : environment
+        ));
+        return ResponseEntity.ok(summary);
     }
 
     @PostMapping

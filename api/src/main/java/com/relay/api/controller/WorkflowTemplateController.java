@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -39,8 +40,28 @@ public class WorkflowTemplateController {
     }
 
     @GetMapping
-    public ResponseEntity<List<WorkflowTemplateResponse>> listTemplates() {
-        return ResponseEntity.ok(workflowTemplateService.listTemplates().stream().map(this::toResponse).collect(Collectors.toList()));
+    public ResponseEntity<List<WorkflowTemplateResponse>> listTemplates(
+        @RequestParam(required = false) String owner,
+        @RequestParam(required = false) String environment,
+        @RequestParam(required = false) String category
+    ) {
+        List<WorkflowTemplate> templates = workflowTemplateService.listTemplates();
+        if (owner != null && !owner.isBlank()) {
+            templates = templates.stream()
+                .filter(template -> owner.equalsIgnoreCase(template.getOwner()))
+                .collect(Collectors.toList());
+        }
+        if (environment != null && !environment.isBlank()) {
+            templates = templates.stream()
+                .filter(template -> environment.equalsIgnoreCase(template.getEnvironment()))
+                .collect(Collectors.toList());
+        }
+        if (category != null && !category.isBlank()) {
+            templates = templates.stream()
+                .filter(template -> category.equalsIgnoreCase(template.getCategory()))
+                .collect(Collectors.toList());
+        }
+        return ResponseEntity.ok(templates.stream().map(this::toResponse).collect(Collectors.toList()));
     }
 
     @PostMapping
