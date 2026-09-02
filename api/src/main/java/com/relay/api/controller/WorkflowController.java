@@ -16,6 +16,7 @@ import com.relay.core.model.WorkflowStatus;
 import com.relay.core.repository.TaskAttemptRepository;
 import com.relay.core.repository.TaskRepository;
 import com.relay.core.repository.WorkflowRepository;
+import com.relay.core.service.TaskExecutionRegistry;
 import com.relay.core.service.WorkflowOrchestrator;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -44,6 +45,7 @@ public class WorkflowController {
     private final WorkflowRepository workflowRepository;
     private final TaskRepository taskRepository;
     private final TaskAttemptRepository taskAttemptRepository;
+    private final TaskExecutionRegistry taskExecutionRegistry;
     private final ObjectMapper objectMapper;
 
     public WorkflowController(
@@ -51,13 +53,20 @@ public class WorkflowController {
         WorkflowRepository workflowRepository,
         TaskRepository taskRepository,
         TaskAttemptRepository taskAttemptRepository,
+        TaskExecutionRegistry taskExecutionRegistry,
         ObjectMapper objectMapper
     ) {
         this.workflowOrchestrator = workflowOrchestrator;
         this.workflowRepository = workflowRepository;
         this.taskRepository = taskRepository;
         this.taskAttemptRepository = taskAttemptRepository;
+        this.taskExecutionRegistry = taskExecutionRegistry;
         this.objectMapper = objectMapper;
+    }
+
+    @GetMapping("/adapters")
+    public ResponseEntity<List<Map<String, Object>>> listSupportedAdapters() {
+        return ResponseEntity.ok(taskExecutionRegistry.listAdapterCapabilities());
     }
 
     @GetMapping
@@ -232,21 +241,7 @@ public class WorkflowController {
     }
 
     private boolean isSupportedAdapterType(String adapterType) {
-        if (adapterType == null || adapterType.isBlank()) {
-            return false;
-        }
-        String normalized = adapterType.trim().toLowerCase();
-        return normalized.equals("inline")
-            || normalized.equals("http")
-            || normalized.equals("db")
-            || normalized.equals("database")
-            || normalized.equals("success")
-            || normalized.equals("charge_card")
-            || normalized.equals("reserve_inventory")
-            || normalized.equals("send_email")
-            || normalized.equals("generate_report")
-            || normalized.equals("fail")
-            || normalized.equals("failing_task");
+        return taskExecutionRegistry.supportsAdapterType(adapterType);
     }
 
     private Map<String, Object> parsePayload(String payload) {
