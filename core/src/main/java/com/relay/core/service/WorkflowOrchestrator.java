@@ -33,6 +33,7 @@ public class WorkflowOrchestrator {
     private final RetryPolicy retryPolicy;
     private final ObjectMapper objectMapper;
     private final WorkflowAuditTracker workflowAuditTracker;
+    private final TaskDispatchPublisher taskDispatchPublisher;
 
     public WorkflowOrchestrator(
         WorkflowRepository workflowRepository,
@@ -42,7 +43,8 @@ public class WorkflowOrchestrator {
         TaskExecutionRegistry taskExecutionRegistry,
         RetryPolicy retryPolicy,
         ObjectMapper objectMapper,
-        WorkflowAuditTracker workflowAuditTracker
+        WorkflowAuditTracker workflowAuditTracker,
+        TaskDispatchPublisher taskDispatchPublisher
     ) {
         this.workflowRepository = workflowRepository;
         this.taskRepository = taskRepository;
@@ -52,6 +54,7 @@ public class WorkflowOrchestrator {
         this.retryPolicy = retryPolicy;
         this.objectMapper = objectMapper;
         this.workflowAuditTracker = workflowAuditTracker;
+        this.taskDispatchPublisher = taskDispatchPublisher == null ? new NoOpTaskDispatchPublisher() : taskDispatchPublisher;
     }
 
     @Transactional
@@ -158,6 +161,13 @@ public class WorkflowOrchestrator {
             List<Task> readyTasks = dependencyGraphResolver.getReadyTasks(workflow);
 
             if (readyTasks.isEmpty()) {
+                boolean hasActiveTasks = workflow.getTasks().stream()
+                    .anyMatch(task -> task.getStatus() == TaskStatus.PENDING || task.getStatus() == TaskStatus.QUEUED || task.getStatus() == TaskStatus.RUNNING);
+                if (hasActiveTasks) {
+                    workflow.setStatus(WorkflowStatus.RUNNING);
+                    workflowRepository.save(workflow);
+                    return workflowRepository.findById(workflowId).orElseThrow();
+                }
                 workflow.setStatus(allTasksSucceeded(workflow) ? WorkflowStatus.COMPLETED : WorkflowStatus.FAILED);
                 workflowRepository.save(workflow);
                 workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow completed execution", Map.of("status", workflow.getStatus().name(), "tasks", workflow.getTasks().size()));
@@ -165,6 +175,20 @@ public class WorkflowOrchestrator {
             }
 
             for (Task task : readyTasks) {
+                if (taskDispatchPublisher.isEnabled()) {
+                    task.setStatus(TaskStatus.QUEUED);
+                    taskRepository.save(task);
+                    taskDispatchPublisher.publish(task);
+                    workflowAuditTracker.record(workflow, task.getId(), "task.state.changed", "Task queued for Kafka dispatch", Map.of(
+                        "taskType", task.getType(),
+                        "status", task.getStatus().name(),
+                        "attemptCount", task.getAttemptCount(),
+                        "version", task.getVersion(),
+                        "source", "kafka"
+                    ));
+                    continue;
+                }
+
                 task.setStatus(TaskStatus.RUNNING);
                 taskRepository.save(task);
 
@@ -183,6 +207,7 @@ public class WorkflowOrchestrator {
 
                     if (result == TaskResult.SUCCESS) {
                         task.setStatus(TaskStatus.SUCCEEDED);
+                        task.setNextAttemptAt(null);
                     } else {
                         task.setStatus(TaskStatus.FAILED);
                         shouldRetry = retryPolicy.shouldRetry(task, task.getAttemptCount() + 1);
@@ -201,8 +226,10 @@ public class WorkflowOrchestrator {
                 if (task.getStatus() == TaskStatus.FAILED) {
                     if (shouldRetry) {
                         task.setStatus(TaskStatus.PENDING);
+                        task.setNextAttemptAt(retryPolicy.getNextAttemptAt(task, task.getAttemptCount()));
                     } else {
                         task.setStatus(TaskStatus.DEAD_LETTERED);
+                        task.setNextAttemptAt(null);
                     }
                 }
 

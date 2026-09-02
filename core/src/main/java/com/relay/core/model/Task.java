@@ -65,6 +65,9 @@ public class Task {
     @Column(name = "attempt_count", nullable = false)
     private Integer attemptCount = 0;
 
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
     @Column(name = "idempotency_key")
     private String idempotencyKey;
 
@@ -165,6 +168,14 @@ public class Task {
 
     public void setAttemptCount(Integer attemptCount) {
         this.attemptCount = attemptCount == null ? 0 : attemptCount;
+    }
+
+    public Instant getNextAttemptAt() {
+        return nextAttemptAt;
+    }
+
+    public void setNextAttemptAt(Instant nextAttemptAt) {
+        this.nextAttemptAt = nextAttemptAt;
     }
 
     public String getIdempotencyKey() {

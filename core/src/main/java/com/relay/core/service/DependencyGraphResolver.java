@@ -5,6 +5,7 @@ import com.relay.core.model.TaskStatus;
 import com.relay.core.model.Workflow;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -25,8 +26,12 @@ public class DependencyGraphResolver {
         validateNoCycles(workflow.getTasks(), tasksById);
 
         List<Task> readyTasks = new ArrayList<>();
+        Instant now = Instant.now();
         for (Task task : workflow.getTasks()) {
             if (task.getStatus() != TaskStatus.PENDING) {
+                continue;
+            }
+            if (task.getNextAttemptAt() != null && task.getNextAttemptAt().isAfter(now)) {
                 continue;
             }
 

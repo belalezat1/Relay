@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, NoOpWorkflowEventPublisher.class, ObjectMapper.class, WorkflowTemplateService.class})
+@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, NoOpWorkflowEventPublisher.class, NoOpTaskDispatchPublisher.class, ObjectMapper.class, WorkflowTemplateService.class})
 @org.springframework.test.context.ContextConfiguration(classes = WorkflowOrchestratorTest.TestConfiguration.class)
 class WorkflowOrchestratorTest {
 
@@ -187,6 +187,28 @@ class WorkflowOrchestratorTest {
         Task task = taskRepository.findByWorkflow_Id(workflow.getId()).getFirst();
         assertThat(task.getStatus()).isEqualTo(TaskStatus.DEAD_LETTERED);
         assertThat(task.getAttemptCount()).isEqualTo(RetryPolicy.DEFAULT_MAX_ATTEMPTS);
+    }
+
+    @Test
+    void delaysRetryableTasksUntilBackoffExpires() {
+        RetryPolicy retryPolicy = new RetryPolicy();
+        retryPolicy.setBackoffEnabled(true);
+
+        Task task = new Task();
+        task.setId(java.util.UUID.randomUUID());
+        task.setStatus(TaskStatus.PENDING);
+        task.setNextAttemptAt(retryPolicy.getNextAttemptAt(task, 2));
+
+        Workflow workflow = new Workflow();
+        workflow.setId(java.util.UUID.randomUUID());
+        workflow.setTasks(List.of(task));
+        task.setWorkflow(workflow);
+
+        DependencyGraphResolver resolver = new DependencyGraphResolver();
+        assertThat(resolver.getReadyTasks(workflow)).isEmpty();
+
+        task.setNextAttemptAt(Instant.now().minusSeconds(1));
+        assertThat(resolver.getReadyTasks(workflow)).contains(task);
     }
 
     @Test
