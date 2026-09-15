@@ -51,6 +51,7 @@ public class Task {
     @Column(name = "version", nullable = false)
     private Integer version = 1;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "payload", nullable = false)
     private String payload = "{}";
 
@@ -70,6 +71,18 @@ public class Task {
 
     @Column(name = "idempotency_key")
     private String idempotencyKey;
+
+    @Column(name = "execution_claimed_at")
+    private Instant executionClaimedAt;
+
+    @Column(name = "execution_completed_at")
+    private Instant executionCompletedAt;
+
+    @Column(name = "locked_by")
+    private String lockedBy;
+
+    @Column(name = "lease_expires_at")
+    private Instant leaseExpiresAt;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -184,6 +197,38 @@ public class Task {
 
     public void setIdempotencyKey(String idempotencyKey) {
         this.idempotencyKey = idempotencyKey;
+    }
+
+    public Instant getExecutionClaimedAt() {
+        return executionClaimedAt;
+    }
+
+    public void setExecutionClaimedAt(Instant executionClaimedAt) {
+        this.executionClaimedAt = executionClaimedAt;
+    }
+
+    public Instant getExecutionCompletedAt() {
+        return executionCompletedAt;
+    }
+
+    public void setExecutionCompletedAt(Instant executionCompletedAt) {
+        this.executionCompletedAt = executionCompletedAt;
+    }
+
+    public String getLockedBy() {
+        return lockedBy;
+    }
+
+    public void setLockedBy(String lockedBy) {
+        this.lockedBy = lockedBy;
+    }
+
+    public Instant getLeaseExpiresAt() {
+        return leaseExpiresAt;
+    }
+
+    public void setLeaseExpiresAt(Instant leaseExpiresAt) {
+        this.leaseExpiresAt = leaseExpiresAt;
     }
 
     public Instant getCreatedAt() {

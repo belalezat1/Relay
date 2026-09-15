@@ -41,9 +41,9 @@ public class WorkflowTemplateController {
 
     @GetMapping
     public ResponseEntity<List<WorkflowTemplateResponse>> listTemplates(
-        @RequestParam(required = false) String owner,
-        @RequestParam(required = false) String environment,
-        @RequestParam(required = false) String category
+        @RequestParam(name="owner", required = false) String owner,
+        @RequestParam(name="environment", required = false) String environment,
+        @RequestParam(name="category", required = false) String category
     ) {
         List<WorkflowTemplate> templates = workflowTemplateService.listTemplates();
         if (owner != null && !owner.isBlank()) {
@@ -71,13 +71,13 @@ public class WorkflowTemplateController {
     }
 
     @GetMapping("/{templateId}")
-    public ResponseEntity<WorkflowTemplateResponse> getTemplate(@PathVariable UUID templateId) {
+    public ResponseEntity<WorkflowTemplateResponse> getTemplate(@PathVariable("templateId") UUID templateId) {
         WorkflowTemplate template = workflowTemplateService.getTemplate(templateId);
         return ResponseEntity.ok(toResponse(template));
     }
 
     @PostMapping("/{templateId}/submit")
-    public ResponseEntity<WorkflowResponse> submitTemplate(@PathVariable UUID templateId, @RequestBody(required = false) WorkflowSubmissionRequest request) {
+    public ResponseEntity<WorkflowResponse> submitTemplate(@PathVariable("templateId") UUID templateId, @RequestBody(required = false) WorkflowSubmissionRequest request) {
         Workflow workflow = workflowTemplateService.submitTemplate(
             templateId,
             request == null ? null : request.getOwner(),

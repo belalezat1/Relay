@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
 @TestPropertySource(properties = {
+    "relay.kafka.enabled=false",
     "spring.datasource.url=jdbc:h2:mem:relay;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
     "spring.datasource.username=sa",
     "spring.datasource.password=",

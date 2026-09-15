@@ -13,6 +13,7 @@ import com.relay.core.repository.TaskAttemptRepository;
 import com.relay.core.repository.TaskRepository;
 import com.relay.core.repository.WorkflowRepository;
 import jakarta.transaction.Transactional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -34,6 +35,9 @@ public class WorkflowOrchestrator {
     private final ObjectMapper objectMapper;
     private final WorkflowAuditTracker workflowAuditTracker;
     private final TaskDispatchPublisher taskDispatchPublisher;
+    private final DeadLetterTaskService deadLetterTaskService;
+    private final TaskExecutionGuard taskExecutionGuard;
+    private final IdempotencyService idempotencyService;
 
     public WorkflowOrchestrator(
         WorkflowRepository workflowRepository,
@@ -44,7 +48,10 @@ public class WorkflowOrchestrator {
         RetryPolicy retryPolicy,
         ObjectMapper objectMapper,
         WorkflowAuditTracker workflowAuditTracker,
-        TaskDispatchPublisher taskDispatchPublisher
+        @Autowired(required = false) TaskDispatchPublisher taskDispatchPublisher,
+        DeadLetterTaskService deadLetterTaskService,
+        @Autowired(required = false) TaskExecutionGuard taskExecutionGuard,
+        @Autowired(required = false) IdempotencyService idempotencyService
     ) {
         this.workflowRepository = workflowRepository;
         this.taskRepository = taskRepository;
@@ -55,12 +62,21 @@ public class WorkflowOrchestrator {
         this.objectMapper = objectMapper;
         this.workflowAuditTracker = workflowAuditTracker;
         this.taskDispatchPublisher = taskDispatchPublisher == null ? new NoOpTaskDispatchPublisher() : taskDispatchPublisher;
+        this.deadLetterTaskService = deadLetterTaskService;
+        this.taskExecutionGuard = taskExecutionGuard;
+        this.idempotencyService = idempotencyService;
     }
 
     @Transactional
     public Workflow createAndExecuteWorkflow(List<TaskDefinition> definitions) {
         if (definitions == null || definitions.isEmpty()) {
             throw new IllegalArgumentException("Workflow must contain at least one task");
+        }
+
+        for (TaskDefinition definition : definitions) {
+            if (definition.getIdempotencyKey() != null && !definition.getIdempotencyKey().isBlank() && idempotencyService != null) {
+                idempotencyService.assertNoActiveDuplicate(definition.getIdempotencyKey());
+            }
         }
 
         Workflow workflow = new Workflow();
@@ -175,6 +191,16 @@ public class WorkflowOrchestrator {
             }
 
             for (Task task : readyTasks) {
+                if (idempotencyService != null && idempotencyService.shouldSkipExecution(task)) {
+                    if (task.getStatus() != TaskStatus.SUCCEEDED && task.getStatus() != TaskStatus.DEAD_LETTERED) {
+                        task.setStatus(TaskStatus.SUCCEEDED);
+                        task.setExecutionCompletedAt(Instant.now());
+                        clearClaim(task);
+                        taskRepository.save(task);
+                    }
+                    continue;
+                }
+
                 if (taskDispatchPublisher.isEnabled()) {
                     task.setStatus(TaskStatus.QUEUED);
                     taskRepository.save(task);
@@ -189,8 +215,20 @@ public class WorkflowOrchestrator {
                     continue;
                 }
 
-                task.setStatus(TaskStatus.RUNNING);
-                taskRepository.save(task);
+                if (taskExecutionGuard != null) {
+                    TaskExecutionGuard.ClaimDecision decision = taskExecutionGuard.decide(task.getId());
+                    if (decision == TaskExecutionGuard.ClaimDecision.ALREADY_COMPLETE) {
+                        continue;
+                    }
+                    if (decision != TaskExecutionGuard.ClaimDecision.CLAIMED) {
+                        continue;
+                    }
+                    task = taskRepository.findById(task.getId()).orElse(task);
+                } else {
+                    task.setStatus(TaskStatus.RUNNING);
+                    task.setExecutionClaimedAt(Instant.now());
+                    taskRepository.save(task);
+                }
 
                 TaskAttempt attempt = new TaskAttempt();
                 attempt.setTask(task);
@@ -208,6 +246,8 @@ public class WorkflowOrchestrator {
                     if (result == TaskResult.SUCCESS) {
                         task.setStatus(TaskStatus.SUCCEEDED);
                         task.setNextAttemptAt(null);
+                        task.setExecutionCompletedAt(Instant.now());
+                        clearClaim(task);
                     } else {
                         task.setStatus(TaskStatus.FAILED);
                         shouldRetry = retryPolicy.shouldRetry(task, task.getAttemptCount() + 1);
@@ -224,17 +264,26 @@ public class WorkflowOrchestrator {
                 task.setAttemptCount(nextAttemptNumber);
 
                 if (task.getStatus() == TaskStatus.FAILED) {
+                    clearClaim(task);
                     if (shouldRetry) {
                         task.setStatus(TaskStatus.PENDING);
                         task.setNextAttemptAt(retryPolicy.getNextAttemptAt(task, task.getAttemptCount()));
                     } else {
                         task.setStatus(TaskStatus.DEAD_LETTERED);
                         task.setNextAttemptAt(null);
+                        task.setExecutionCompletedAt(Instant.now());
+                        if (deadLetterTaskService != null) {
+                            deadLetterTaskService.record(task, attempt.getError());
+                        }
                     }
                 }
 
                 taskRepository.save(task);
                 taskAttemptRepository.save(attempt);
+                if (idempotencyService != null
+                    && (task.getStatus() == TaskStatus.SUCCEEDED || task.getStatus() == TaskStatus.DEAD_LETTERED)) {
+                    idempotencyService.recordCompletion(task, attempt.getResult());
+                }
                 workflowAuditTracker.record(workflow, task.getId(), "task.state.changed", "Task state updated", Map.of(
                     "taskType", task.getType(),
                     "status", task.getStatus().name(),
@@ -289,6 +338,12 @@ public class WorkflowOrchestrator {
         workflowRepository.save(workflow);
         workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow cancelled", Map.of("status", workflow.getStatus().name()));
         return workflowRepository.findById(workflowId).orElseThrow();
+    }
+
+    private void clearClaim(Task task) {
+        task.setExecutionClaimedAt(null);
+        task.setLockedBy(null);
+        task.setLeaseExpiresAt(null);
     }
 
     private boolean allTasksSucceeded(Workflow workflow) {

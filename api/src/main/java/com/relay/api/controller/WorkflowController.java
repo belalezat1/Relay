@@ -71,12 +71,12 @@ public class WorkflowController {
 
     @GetMapping
     public ResponseEntity<List<WorkflowResponse>> listWorkflows(
-        @RequestParam(required = false) WorkflowStatus status,
-        @RequestParam(required = false) String taskType,
-        @RequestParam(required = false) String owner,
-        @RequestParam(required = false) String environment,
-        @RequestParam(defaultValue = "0") int page,
-        @RequestParam(defaultValue = "20") int size
+        @RequestParam(name="status", required = false) WorkflowStatus status,
+        @RequestParam(name="taskType", required = false) String taskType,
+        @RequestParam(name="owner", required = false) String owner,
+        @RequestParam(name="environment", required = false) String environment,
+        @RequestParam(name="page", defaultValue = "0") int page,
+        @RequestParam(name="size", defaultValue = "20") int size
     ) {
         List<Workflow> workflows = status == null
             ? workflowRepository.findAllByOrderByCreatedAtDesc()
@@ -110,8 +110,8 @@ public class WorkflowController {
 
     @GetMapping("/summary")
     public ResponseEntity<Map<String, Object>> getWorkflowSummary(
-        @RequestParam(required = false) String owner,
-        @RequestParam(required = false) String environment
+        @RequestParam(name="owner", required = false) String owner,
+        @RequestParam(name="environment", required = false) String environment
     ) {
         List<Workflow> workflows = workflowRepository.findAllByOrderByCreatedAtDesc();
         if (owner != null && !owner.isBlank()) {
@@ -182,7 +182,12 @@ public class WorkflowController {
             definitions.add(definition);
         }
 
-        Workflow workflow = workflowOrchestrator.createAndExecuteWorkflow(definitions);
+        Workflow workflow;
+        try {
+            workflow = workflowOrchestrator.createAndExecuteWorkflow(definitions);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
+        }
         workflow.setOwner(request.getOwner());
         workflow.setEnvironment(request.getEnvironment());
         workflow.setTimeoutSeconds(request.getTimeoutSeconds());
@@ -192,26 +197,26 @@ public class WorkflowController {
     }
 
     @GetMapping("/{workflowId}")
-    public ResponseEntity<WorkflowResponse> getWorkflow(@PathVariable UUID workflowId) {
+    public ResponseEntity<WorkflowResponse> getWorkflow(@PathVariable("workflowId") UUID workflowId) {
         Workflow workflow = workflowRepository.findById(workflowId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Workflow not found: " + workflowId));
         return ResponseEntity.ok(toResponse(workflow, null));
     }
 
     @PostMapping("/{workflowId}/pause")
-    public ResponseEntity<WorkflowResponse> pauseWorkflow(@PathVariable UUID workflowId) {
+    public ResponseEntity<WorkflowResponse> pauseWorkflow(@PathVariable("workflowId") UUID workflowId) {
         Workflow workflow = workflowOrchestrator.pauseWorkflow(workflowId);
         return ResponseEntity.ok(toResponse(workflow, null));
     }
 
     @PostMapping("/{workflowId}/resume")
-    public ResponseEntity<WorkflowResponse> resumeWorkflow(@PathVariable UUID workflowId) {
+    public ResponseEntity<WorkflowResponse> resumeWorkflow(@PathVariable("workflowId") UUID workflowId) {
         Workflow workflow = workflowOrchestrator.resumeWorkflow(workflowId);
         return ResponseEntity.ok(toResponse(workflow, null));
     }
 
     @PostMapping("/{workflowId}/cancel")
-    public ResponseEntity<WorkflowResponse> cancelWorkflow(@PathVariable UUID workflowId) {
+    public ResponseEntity<WorkflowResponse> cancelWorkflow(@PathVariable("workflowId") UUID workflowId) {
         Workflow workflow = workflowOrchestrator.cancelWorkflow(workflowId);
         return ResponseEntity.ok(toResponse(workflow, null));
     }

@@ -17,6 +17,8 @@ public class TaskDispatchMessage {
     private String idempotencyKey;
     private UUID[] dependsOn;
     private Instant dispatchedAt;
+    private Instant retryAfter;
+    private Integer attemptNumber;
 
     public static TaskDispatchMessage fromTask(Task task) {
         TaskDispatchMessage message = new TaskDispatchMessage();
@@ -34,6 +36,7 @@ public class TaskDispatchMessage {
         message.setIdempotencyKey(task.getIdempotencyKey());
         message.setDependsOn(task.getDependsOn() == null ? new UUID[0] : task.getDependsOn());
         message.setDispatchedAt(Instant.now());
+        message.setAttemptNumber(task.getAttemptCount());
         return message;
     }
 
@@ -59,4 +62,8 @@ public class TaskDispatchMessage {
     public void setDependsOn(UUID[] dependsOn) { this.dependsOn = dependsOn; }
     public Instant getDispatchedAt() { return dispatchedAt; }
     public void setDispatchedAt(Instant dispatchedAt) { this.dispatchedAt = dispatchedAt; }
+    public Instant getRetryAfter() { return retryAfter; }
+    public void setRetryAfter(Instant retryAfter) { this.retryAfter = retryAfter; }
+    public Integer getAttemptNumber() { return attemptNumber; }
+    public void setAttemptNumber(Integer attemptNumber) { this.attemptNumber = attemptNumber; }
 }

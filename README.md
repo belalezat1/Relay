@@ -1,126 +1,122 @@
 # Relay
 
-Relay is a Java/Spring Boot workflow orchestration engine for durable, dependency-aware task execution.
+Durable, dependency-aware workflow orchestration. **PostgreSQL** is the source of truth; **Kafka** carries task dispatch, delayed retries, and lifecycle events through a transactional outbox (no fire-and-forget past the database).
 
-The project is intentionally small but realistic: it models workflows, tasks, and task attempts in PostgreSQL, resolves dependency order, executes ready work, and exposes a REST API for submission and retrieval.
+## What it does
 
-## Goals
-- Durable workflow state backed by PostgreSQL
-- Dependency-aware execution ordering
-- Task attempt audit trail for retries and debugging
-- Governance-aware workflow metadata and ownership boundaries
-- Operator-friendly diagnostics, analytics, and lifecycle controls
-- A clean event abstraction that can support Kafka later without changing the core execution model
-- Local developer setup using Docker Compose and Maven
+- Submit a DAG over REST; Relay schedules ready tasks from dependency graphs
+- Claims work with Postgres row locks (`FOR UPDATE SKIP LOCKED`)
+- Retries with exponential backoff + jitter; exhausted tasks go to a DLQ with replay
+- Outbox-drained Kafka topics: `relay.workflow.tasks`, `relay.workflow.tasks.retry`, `relay.workflow.events`
+- Operator APIs for audit, dead-letter replay, dispatch failures, health, and metrics
+
+```mermaid
+flowchart LR
+  Client[REST client] --> API[relay-api]
+  API --> PG[(PostgreSQL SoT)]
+  API --> Outbox[outbox_events]
+  Outbox --> Publisher[OutboxPublisher]
+  Publisher --> Kafka[(Kafka)]
+  Kafka --> Tasks[TaskDispatchConsumer]
+  Kafka --> Retry[TaskRetryConsumer]
+  Kafka --> Events[WorkflowKafkaConsumer]
+  Tasks --> PG
+  Retry --> Outbox
+  Events --> PG
+```
 
 ## Tech stack
-- Java 21
-- Maven multi-module build
-- Spring Boot 3.4.x
-- Spring Data JPA
-- Flyway
-- PostgreSQL
-- Optional Kafka event transport behind an abstraction layer
 
-## Repository layout
-- `api/` — REST API module, lifecycle endpoints, audit access, and operator visibility
-- `core/` — domain model, repositories, orchestration logic, audit tracking, and event abstraction
-- `docker-compose.yml` — local PostgreSQL environment and optional app stack
-- `pom.xml` — parent Maven build configuration
-- `docs/` — design notes, runbooks, and milestone records
+- Java 21, Maven multi-module (`api`, `core`)
+- Spring Boot 3.4, Spring Data JPA, Flyway
+- PostgreSQL + Kafka (Compose)
+- Micrometer / Actuator
 
-## Local setup
-Prerequisites:
-- Java 21
-- Maven 3.9+
-- Docker Desktop or Docker Engine
+## Quickstart
 
-1. Copy the environment template if needed:
-   ```bash
-   cp .env.example .env
-   ```
+Prerequisites: Java 21, Maven 3.9+, Docker.
 
-2. Start PostgreSQL:
-   ```bash
-   docker compose up -d postgres
-   ```
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+cp .env.example .env
+docker compose --profile app up -d --build
+```
 
-3. Run the test suite:
-   ```bash
-   mvn test
-   ```
+Health: `curl -s http://localhost:8080/api/actuator/health`
 
-4. Start the API with the default development profile:
-   ```bash
-   APP_ENV=dev DB_HOST=localhost DB_PORT=5432 DB_NAME=relay_dev DB_USERNAME=relay DB_PASSWORD=relay_dev APP_PORT=8080 mvn -pl api spring-boot:run
-   ```
+Add a second worker process:
 
-5. Or start the app through Docker Compose:
-   ```bash
-   docker compose --profile app up -d --build
-   ```
+```bash
+docker compose --profile distributed up -d --build
+```
 
-6. Submit a workflow through the API:
-   ```bash
-   curl -X POST http://localhost:8080/api/workflows \
-     -H "Content-Type: application/json" \
-     -d '{
-       "tasks": [
-         {"id": "task-a", "type": "success"},
-         {"id": "task-b", "type": "success", "dependsOn": ["task-a"]}
-       ]
-     }'
-   ```
+Submit a workflow:
 
-## Environment and deployment readiness
-Relay now supports environment-specific configuration profiles and deployable container settings without changing the core runtime architecture.
+```bash
+curl -X POST http://localhost:8080/api/workflows \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tasks": [
+      {"id": "task-a", "type": "success"},
+      {"id": "task-b", "type": "success", "dependsOn": ["task-a"]}
+    ]
+  }'
+```
 
-- `dev` profile: local development defaults with debug logging and local database configuration.
-- `prod` profile: production-oriented defaults with more conservative logging.
-- `docker-compose.yml`: runs PostgreSQL and optionally the API in a local containerized setup.
-- `.env.example`: centralizes deployment variables for the runtime and database.
+```bash
+mvn test
+./scripts/benchmark.sh   # writes docs/benchmarks.md when Docker is up
+```
 
-Key runtime variables:
-- `APP_ENV` — selects the active Spring profile (`dev` or `prod`)
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` — database connection settings
-- `APP_PORT` — HTTP port for the API
-- `WORKER_MAX_CONCURRENCY`, `WORKER_POLL_DELAY` — worker scheduling controls
-- `relay.kafka.enabled` — turns on the optional Kafka-backed workflow event publisher
-- `relay.kafka.topic` — the Kafka topic used for workflow lifecycle events
+## Operator APIs
 
-## Pre-Kafka platform maturity gate
-The project intentionally stops before Kafka until the system is proven durable, governable, and operationally understandable.
+```bash
+curl http://localhost:8080/api/dead-letters
+curl -X POST http://localhost:8080/api/dead-letters/<id>/replay
+curl http://localhost:8080/api/dispatch-failures
+curl http://localhost:8080/api/actuator/health
+curl http://localhost:8080/api/actuator/metrics
+```
 
-Completed pre-Kafka work includes:
-- explicit workflow ownership and environment metadata
-- template and workflow-level governance defaults
-- operator-friendly filters and workflow summaries
-- durable audit logging and event abstraction
-- optional Kafka transport behind the event publisher interface without making Kafka the workflow source of truth
+## Configuration
 
-This keeps Postgres as the authoritative workflow state while Kafka remains a later distributed transport option.
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `KAFKA_ENABLED` | `true` | Kafka publishers/listeners + outbox drain (required at runtime) |
+| `KAFKA_BROKERS` | `localhost:9092` | Bootstrap servers |
+| `KAFKA_TASK_TOPIC` | `relay.workflow.tasks` | Task dispatch topic |
+| `KAFKA_TASK_RETRY_TOPIC` | `relay.workflow.tasks.retry` | Delayed retry topic |
+| `KAFKA_TOPIC` | `relay.workflow.events` | Lifecycle events topic |
+| `RETRY_BACKOFF_ENABLED` | `true` | Exponential backoff + jitter |
+| `RETRY_MAX_ATTEMPTS` | `3` | Max attempts before DLQ |
+| `TASK_CLAIM_LEASE_SECONDS` | `300` | Execution lease duration |
+| `TASK_CLAIM_SKIP_LOCKED` | `true` | Postgres `SKIP LOCKED` claims |
+| `OUTBOX_POLL_DELAY` | `1000` | Outbox drain interval (ms) |
+| `OUTBOX_MAX_ATTEMPTS` | `8` | Publish attempts before outbox `FAILED` |
+| `WORKER_MAX_CONCURRENCY` | `4` | Worker concurrency |
 
-## Architecture summary
-- `core` owns the domain model and orchestration rules.
-- `api` exposes HTTP endpoints and translates requests/responses.
-- Postgres holds the durable workflow, task, and attempt state.
-- Flyway applies schema changes consistently for each environment.
-- `WorkflowEventPublisher` decouples emitted events from the database-backed workflow engine so Kafka can be plugged in later.
+## Docs
 
-## Notes
-- Design and planning documents live in the `docs/` folder as part of the project’s working history and milestone records.
-- The architecture is intentionally structured to add distributed messaging only after the single-node workflow engine is mature and operationally trusted.
+- [Architecture](docs/architecture.md)
+- [Runbook](docs/runbook.md)
+- [Kafka contract](docs/kafka-contract.md)
+- [Kafka runbook](docs/kafka-runbook.md)
+- [Phase IX status](docs/phase-ix.md)
+- [Benchmarks](docs/benchmarks.md)
 
-## Project roadmap
-- Phase I: project bootstrap and stable Java + Maven setup
-- Phase II: PostgreSQL-backed persistence and Flyway schema
-- Phase III: workflow orchestration, dependency resolution, and REST API
-- Phase IV: retry handling, worker execution loop, and dead-lettering
-- Phase V: operational hardening and runtime safety
-- Phase VI: deployment and environment readiness
-- Phase VII: platform maturity and integration boundaries
-- Phase VIII: pre-Kafka readiness gate (governance, analytics, event abstraction, operator UX)
-- Phase IX: Kafka adoption as the first distributed transport layer
+## Resume talking points (tested)
 
-## Next phase
-Kafka is intentionally the next explicit distributed phase, not a shortcut for basic workflow maturity.
+1. Concurrent claim path: two claimers cannot both receive `CLAIMED` for the same ready task (`KafkaReliabilityTest` / Postgres IT).
+2. Duplicate delivery of a succeeded task is a no-op (single attempt; adapters skip `ALREADY_COMPLETE`).
+3. Dispatch/retry/lifecycle messages are written to `outbox_events` in the same transaction as state changes before broker publish; DLQ replay requeues safely.
+
+## Troubleshooting
+
+- **Java 26 vs 21**: set `JAVA_HOME` to OpenJDK 21 before `mvn`.
+- **Tasks stuck RUNNING**: lease recovery returns expired claims to `PENDING`.
+- **No consume**: confirm `OutboxPublisher` marks rows `PUBLISHED`; check `/api/dispatch-failures`.
+- **Duplicate idempotency_key**: submit rejected while a non-terminal task holds the key.
+
+## License
+
+See `LICENSE`.

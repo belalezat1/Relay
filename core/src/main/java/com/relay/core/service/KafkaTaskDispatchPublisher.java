@@ -1,26 +1,21 @@
 package com.relay.core.service;
 
 import com.relay.core.model.Task;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+/**
+ * Enqueues task dispatch commands into the transactional outbox.
+ * {@link OutboxPublisher} is the sole Kafka producer.
+ */
 @Service
-@ConditionalOnProperty(name = "relay.kafka.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "relay.kafka.enabled", havingValue = "true", matchIfMissing = true)
 public class KafkaTaskDispatchPublisher implements TaskDispatchPublisher {
 
-    private static final Logger log = LoggerFactory.getLogger(KafkaTaskDispatchPublisher.class);
+    private final OutboxService outboxService;
 
-    private final KafkaTemplate<String, Object> kafkaTemplate;
-
-    @Value("${relay.kafka.task-topic:relay.workflow.tasks}")
-    private String topic;
-
-    public KafkaTaskDispatchPublisher(KafkaTemplate<String, Object> kafkaTemplate) {
-        this.kafkaTemplate = kafkaTemplate;
+    public KafkaTaskDispatchPublisher(OutboxService outboxService) {
+        this.outboxService = outboxService;
     }
 
     @Override
@@ -30,12 +25,7 @@ public class KafkaTaskDispatchPublisher implements TaskDispatchPublisher {
         }
 
         TaskDispatchMessage message = TaskDispatchMessage.fromTask(task);
-        kafkaTemplate.send(topic, task.getWorkflow().getId().toString(), message)
-            .whenComplete((result, ex) -> {
-                if (ex != null) {
-                    log.warn("Failed to publish task dispatch for task {} to Kafka topic {}", task.getId(), topic, ex);
-                }
-            });
+        outboxService.enqueueTaskDispatch(task.getWorkflow().getId(), message);
     }
 
     @Override

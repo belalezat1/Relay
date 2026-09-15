@@ -64,7 +64,7 @@ class WorkflowWorkerTest {
         private final UUID workflowId;
 
         private RecordingWorkflowOrchestrator(UUID workflowId) {
-            super(null, null, null, null, null, null, new ObjectMapper(), new WorkflowAuditTracker(null, new ObjectMapper()), new NoOpTaskDispatchPublisher());
+            super(null, null, null, null, null, null, new ObjectMapper(), new WorkflowAuditTracker(null, new ObjectMapper()), new NoOpTaskDispatchPublisher(), null, null, null);
             this.workflowId = workflowId;
         }
 

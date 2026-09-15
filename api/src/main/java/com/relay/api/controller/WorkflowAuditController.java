@@ -40,7 +40,7 @@ public class WorkflowAuditController {
     }
 
     @GetMapping("/{workflowId}/audit")
-    public ResponseEntity<List<WorkflowAuditEventResponse>> getAuditTrail(@PathVariable UUID workflowId) {
+    public ResponseEntity<List<WorkflowAuditEventResponse>> getAuditTrail(@PathVariable("workflowId") UUID workflowId) {
         Workflow workflow = workflowRepository.findById(workflowId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Workflow not found: " + workflowId));
 

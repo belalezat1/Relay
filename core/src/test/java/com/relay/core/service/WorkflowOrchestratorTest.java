@@ -10,6 +10,8 @@ import com.relay.core.model.WorkflowAuditEvent;
 import com.relay.core.model.WorkflowStatus;
 import com.relay.core.model.WorkflowTemplate;
 import com.relay.core.model.WorkflowTemplateRequest;
+import com.relay.core.model.DeadLetterTask;
+import com.relay.core.repository.DeadLetterTaskRepository;
 import com.relay.core.repository.TaskAttemptRepository;
 import com.relay.core.repository.TaskRepository;
 import com.relay.core.repository.WorkflowAuditEventRepository;
@@ -25,6 +27,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 
+import org.springframework.test.context.TestPropertySource;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -33,14 +37,19 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, NoOpWorkflowEventPublisher.class, NoOpTaskDispatchPublisher.class, ObjectMapper.class, WorkflowTemplateService.class})
+@TestPropertySource(properties = {
+    "relay.kafka.enabled=false",
+    "relay.retry.backoff-enabled=false",
+    "relay.kafka.retry-backoff-enabled=false"
+})
+@Import({WorkflowOrchestrator.class, DependencyGraphResolver.class, TaskExecutionRegistry.class, RetryPolicy.class, WorkflowAuditTracker.class, NoOpWorkflowEventPublisher.class, NoOpTaskDispatchPublisher.class, ObjectMapper.class, WorkflowTemplateService.class, DeadLetterTaskService.class})
 @org.springframework.test.context.ContextConfiguration(classes = WorkflowOrchestratorTest.TestConfiguration.class)
 class WorkflowOrchestratorTest {
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
-    @EnableJpaRepositories(basePackageClasses = {WorkflowRepository.class, TaskRepository.class, TaskAttemptRepository.class, WorkflowAuditEventRepository.class, WorkflowTemplateRepository.class})
-    @EntityScan(basePackageClasses = {Workflow.class, Task.class, TaskAttempt.class, WorkflowAuditEvent.class, WorkflowTemplate.class})
+    @EnableJpaRepositories(basePackageClasses = {WorkflowRepository.class, TaskRepository.class, TaskAttemptRepository.class, WorkflowAuditEventRepository.class, WorkflowTemplateRepository.class, DeadLetterTaskRepository.class})
+    @EntityScan(basePackageClasses = {Workflow.class, Task.class, TaskAttempt.class, WorkflowAuditEvent.class, WorkflowTemplate.class, DeadLetterTask.class})
     static class TestConfiguration {
     }
 
@@ -64,6 +73,9 @@ class WorkflowOrchestratorTest {
 
     @Autowired
     private WorkflowTemplateService workflowTemplateService;
+
+    @Autowired
+    private DeadLetterTaskRepository deadLetterTaskRepository;
 
     @Test
     void createsWorkflowFromTemplate() {
@@ -187,6 +199,7 @@ class WorkflowOrchestratorTest {
         Task task = taskRepository.findByWorkflow_Id(workflow.getId()).getFirst();
         assertThat(task.getStatus()).isEqualTo(TaskStatus.DEAD_LETTERED);
         assertThat(task.getAttemptCount()).isEqualTo(RetryPolicy.DEFAULT_MAX_ATTEMPTS);
+        assertThat(deadLetterTaskRepository.findByWorkflowIdOrderByCreatedAtDesc(workflow.getId())).hasSize(1);
     }
 
     @Test
