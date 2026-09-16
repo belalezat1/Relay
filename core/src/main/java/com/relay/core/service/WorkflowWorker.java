@@ -22,21 +22,32 @@ public class WorkflowWorker {
     private final WorkflowDispatchQueue dispatchQueue;
     private final Semaphore concurrencyLimit;
     private final Set<UUID> inFlightWorkflows = ConcurrentHashMap.newKeySet();
+    private final boolean orchestrationEnabled;
 
     public WorkflowWorker(
         WorkflowRepository workflowRepository,
         WorkflowOrchestrator workflowOrchestrator,
         WorkflowDispatchQueue dispatchQueue,
-        @Value("${relay.worker.max-concurrency:4}") int maxConcurrency
+        @Value("${relay.worker.max-concurrency:4}") int maxConcurrency,
+        @Value("${relay.worker.orchestration-enabled:true}") boolean orchestrationEnabled
     ) {
         this.workflowRepository = workflowRepository;
         this.workflowOrchestrator = workflowOrchestrator;
         this.dispatchQueue = dispatchQueue;
         this.concurrencyLimit = new Semaphore(Math.max(1, maxConcurrency));
+        this.orchestrationEnabled = orchestrationEnabled;
+    }
+
+    public boolean isOrchestrationEnabled() {
+        return orchestrationEnabled;
     }
 
     @Scheduled(fixedDelayString = "${relay.worker.poll-delay:5000}")
     public void processPendingWorkflows() {
+        if (!orchestrationEnabled) {
+            return;
+        }
+
         List<Workflow> workflows = workflowRepository.findAllByOrderByCreatedAtDesc();
         for (Workflow workflow : workflows) {
             if (workflow.getStatus() == null) {

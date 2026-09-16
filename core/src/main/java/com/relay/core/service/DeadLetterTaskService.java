@@ -12,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -23,11 +22,10 @@ public class DeadLetterTaskService {
     private final DeadLetterTaskRepository repository;
     private final TaskRepository taskRepository;
     private final WorkflowRepository workflowRepository;
-    private final TaskDispatchPublisher taskDispatchPublisher;
     private final WorkflowAuditTracker workflowAuditTracker;
 
     public DeadLetterTaskService(DeadLetterTaskRepository repository) {
-        this(repository, null, null, null, null);
+        this(repository, null, null, null);
     }
 
     @Autowired
@@ -35,13 +33,11 @@ public class DeadLetterTaskService {
         DeadLetterTaskRepository repository,
         @Autowired(required = false) TaskRepository taskRepository,
         @Autowired(required = false) WorkflowRepository workflowRepository,
-        @Autowired(required = false) TaskDispatchPublisher taskDispatchPublisher,
         @Autowired(required = false) WorkflowAuditTracker workflowAuditTracker
     ) {
         this.repository = repository;
         this.taskRepository = taskRepository;
         this.workflowRepository = workflowRepository;
-        this.taskDispatchPublisher = taskDispatchPublisher == null ? new NoOpTaskDispatchPublisher() : taskDispatchPublisher;
         this.workflowAuditTracker = workflowAuditTracker;
     }
 
@@ -67,24 +63,33 @@ public class DeadLetterTaskService {
             : repository.findByWorkflowIdOrderByCreatedAtDesc(workflowId);
     }
 
+    /**
+     * Replay a dead-lettered task in place. Resets the task and (if needed) the workflow
+     * in Postgres, deletes the DLQ row, and lets the orchestrator rediscover the work.
+     * Re-runs the task side effect when execution resumes.
+     */
     @Transactional
-    public DeadLetterTask replay(UUID deadLetterId) {
+    public Task replay(UUID deadLetterId) {
         if (taskRepository == null || workflowRepository == null) {
             throw new IllegalStateException("Dead-letter replay requires task and workflow repositories");
         }
 
         DeadLetterTask deadLetter = repository.findByIdWithTask(deadLetterId)
             .orElseThrow(() -> new IllegalArgumentException("Dead letter not found: " + deadLetterId));
-        if (deadLetter.getReplayedAt() != null) {
-            throw new IllegalStateException("Dead letter already replayed: " + deadLetterId);
-        }
 
         Task task = deadLetter.getTask();
         if (task == null) {
             throw new IllegalStateException("Dead letter " + deadLetterId + " has no task");
         }
+        if (task.getStatus() != TaskStatus.DEAD_LETTERED) {
+            throw new IllegalStateException("Task is not dead-lettered: " + task.getId());
+        }
+
+        UUID taskId = task.getId();
+        UUID workflowId = deadLetter.getWorkflowId();
 
         task.setStatus(TaskStatus.PENDING);
+        task.setAttemptCount(0);
         task.setExecutionClaimedAt(null);
         task.setExecutionCompletedAt(null);
         task.setLockedBy(null);
@@ -93,30 +98,30 @@ public class DeadLetterTaskService {
         taskRepository.save(task);
 
         Workflow workflow = task.getWorkflow();
-        if (workflow != null
-            && (workflow.getStatus() == WorkflowStatus.FAILED || workflow.getStatus() == WorkflowStatus.COMPLETED)) {
+        if (workflow == null && workflowId != null) {
+            workflow = workflowRepository.findById(workflowId).orElse(null);
+        }
+        if (workflow != null && workflow.getStatus() == WorkflowStatus.FAILED) {
             workflow.setStatus(WorkflowStatus.PENDING);
             workflowRepository.save(workflow);
+            if (workflowAuditTracker != null) {
+                workflowAuditTracker.record(workflow, taskId, "workflow.state.changed", "Workflow reopened after dead-letter replay", Map.of(
+                    "status", WorkflowStatus.PENDING.name(),
+                    "deadLetterId", deadLetterId.toString()
+                ));
+            }
         }
 
-        deadLetter.setReplayedAt(Instant.now());
-        repository.save(deadLetter);
-
-        if (taskDispatchPublisher.isEnabled()) {
-            Task queued = taskRepository.findByIdWithWorkflow(task.getId()).orElse(task);
-            queued.setStatus(TaskStatus.QUEUED);
-            taskRepository.save(queued);
-            taskDispatchPublisher.publish(queued);
-        }
+        repository.delete(deadLetter);
 
         if (workflowAuditTracker != null && workflow != null) {
-            workflowAuditTracker.record(workflow, task.getId(), "task.dead_letter.replayed", "Dead-lettered task requeued", Map.of(
+            workflowAuditTracker.record(workflow, taskId, "task.replayed", "Dead-lettered task reset for rediscovery", Map.of(
                 "deadLetterId", deadLetterId.toString(),
                 "status", TaskStatus.PENDING.name(),
-                "kafka", taskDispatchPublisher.isEnabled()
+                "attemptCount", 0
             ));
         }
 
-        return deadLetter;
+        return taskRepository.findById(taskId).orElse(task);
     }
 }

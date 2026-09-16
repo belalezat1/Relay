@@ -36,7 +36,6 @@ public class WorkflowOrchestrator {
     private final WorkflowAuditTracker workflowAuditTracker;
     private final TaskDispatchPublisher taskDispatchPublisher;
     private final DeadLetterTaskService deadLetterTaskService;
-    private final TaskExecutionGuard taskExecutionGuard;
     private final IdempotencyService idempotencyService;
 
     public WorkflowOrchestrator(
@@ -50,7 +49,6 @@ public class WorkflowOrchestrator {
         WorkflowAuditTracker workflowAuditTracker,
         @Autowired(required = false) TaskDispatchPublisher taskDispatchPublisher,
         DeadLetterTaskService deadLetterTaskService,
-        @Autowired(required = false) TaskExecutionGuard taskExecutionGuard,
         @Autowired(required = false) IdempotencyService idempotencyService
     ) {
         this.workflowRepository = workflowRepository;
@@ -63,7 +61,6 @@ public class WorkflowOrchestrator {
         this.workflowAuditTracker = workflowAuditTracker;
         this.taskDispatchPublisher = taskDispatchPublisher == null ? new NoOpTaskDispatchPublisher() : taskDispatchPublisher;
         this.deadLetterTaskService = deadLetterTaskService;
-        this.taskExecutionGuard = taskExecutionGuard;
         this.idempotencyService = idempotencyService;
     }
 
@@ -215,20 +212,25 @@ public class WorkflowOrchestrator {
                     continue;
                 }
 
-                if (taskExecutionGuard != null) {
-                    TaskExecutionGuard.ClaimDecision decision = taskExecutionGuard.decide(task.getId());
-                    if (decision == TaskExecutionGuard.ClaimDecision.ALREADY_COMPLETE) {
-                        continue;
-                    }
-                    if (decision != TaskExecutionGuard.ClaimDecision.CLAIMED) {
-                        continue;
-                    }
-                    task = taskRepository.findById(task.getId()).orElse(task);
-                } else {
-                    task.setStatus(TaskStatus.RUNNING);
-                    task.setExecutionClaimedAt(Instant.now());
-                    taskRepository.save(task);
+                // In-process path: claim in the current transaction.
+                // Do not use TaskExecutionGuard (REQUIRES_NEW) here — nested claims cannot see
+                // tasks created in this still-open transaction and would spuriously return MISSING.
+                if (task.getStatus() == TaskStatus.SUCCEEDED || task.getStatus() == TaskStatus.DEAD_LETTERED) {
+                    continue;
                 }
+                if (task.getStatus() == TaskStatus.RUNNING
+                    && task.getExecutionClaimedAt() != null
+                    && task.getLeaseExpiresAt() != null
+                    && task.getLeaseExpiresAt().isAfter(Instant.now())) {
+                    workflow.setStatus(WorkflowStatus.RUNNING);
+                    workflowRepository.save(workflow);
+                    return workflowRepository.findById(workflowId).orElseThrow();
+                }
+                task.setStatus(TaskStatus.RUNNING);
+                Instant claimedAt = Instant.now();
+                task.setExecutionClaimedAt(claimedAt);
+                task.setLeaseExpiresAt(claimedAt.plusSeconds(300));
+                taskRepository.save(task);
 
                 TaskAttempt attempt = new TaskAttempt();
                 attempt.setTask(task);

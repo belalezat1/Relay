@@ -1,6 +1,12 @@
 # Project-local docs and planning artifacts
-# Keep these files on the machine, but do not commit them.
-docs/
+# Keep historical phase notes local; track operator docs referenced by README.
+docs/*
+!docs/architecture.md
+!docs/runbook.md
+!docs/kafka-contract.md
+!docs/kafka-runbook.md
+!docs/phase-ix.md
+!docs/benchmarks.md
 plan.md
 .copilot/
 

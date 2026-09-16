@@ -39,16 +39,15 @@ Prerequisites: Java 21, Maven 3.9+, Docker.
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 cp .env.example .env
-docker compose --profile app up -d --build
+
+# Postgres + API (Kafka off by default in Compose app profile)
+KAFKA_ENABLED=false docker compose --profile app up -d --build
+
+# Postgres + Kafka + API orchestrator + consume-only worker
+KAFKA_ENABLED=true docker compose --profile distributed up -d --build
 ```
 
 Health: `curl -s http://localhost:8080/api/actuator/health`
-
-Add a second worker process:
-
-```bash
-docker compose --profile distributed up -d --build
-```
 
 Submit a workflow:
 
@@ -65,7 +64,8 @@ curl -X POST http://localhost:8080/api/workflows \
 
 ```bash
 mvn test
-./scripts/benchmark.sh   # writes docs/benchmarks.md when Docker is up
+./scripts/kafka-smoke.sh   # distributed + Kafka-off rollback when Docker is up
+./scripts/benchmark.sh     # writes docs/benchmarks.md when Docker is up
 ```
 
 ## Operator APIs
@@ -82,7 +82,8 @@ curl http://localhost:8080/api/actuator/metrics
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `KAFKA_ENABLED` | `true` | Kafka publishers/listeners + outbox drain (required at runtime) |
+| `KAFKA_ENABLED` | `true` (host) / Compose profile-specific | Kafka publishers/listeners + outbox drain |
+| `WORKER_ORCHESTRATION_ENABLED` | `true` | When `false`, process only consumes Kafka tasks |
 | `KAFKA_BROKERS` | `localhost:9092` | Bootstrap servers |
 | `KAFKA_TASK_TOPIC` | `relay.workflow.tasks` | Task dispatch topic |
 | `KAFKA_TASK_RETRY_TOPIC` | `relay.workflow.tasks.retry` | Delayed retry topic |
@@ -101,7 +102,7 @@ curl http://localhost:8080/api/actuator/metrics
 - [Runbook](docs/runbook.md)
 - [Kafka contract](docs/kafka-contract.md)
 - [Kafka runbook](docs/kafka-runbook.md)
-- [Phase IX status](docs/phase-ix.md)
+- [Phase IX status (COMPLETE)](docs/phase-ix.md)
 - [Benchmarks](docs/benchmarks.md)
 
 ## Resume talking points (tested)

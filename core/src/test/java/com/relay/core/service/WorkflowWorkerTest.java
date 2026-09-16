@@ -25,13 +25,38 @@ class WorkflowWorkerTest {
         WorkflowRepository workflowRepository = createRepository(workflow);
         RecordingWorkflowOrchestrator workflowOrchestrator = new RecordingWorkflowOrchestrator(workflow.getId());
         WorkflowDispatchQueue queue = new WorkflowDispatchQueue();
-        WorkflowWorker worker = new WorkflowWorker(workflowRepository, workflowOrchestrator, queue, 1);
+        WorkflowWorker worker = new WorkflowWorker(workflowRepository, workflowOrchestrator, queue, 1, true);
 
         CompletableFuture<Void> firstRun = CompletableFuture.runAsync(worker::processPendingWorkflows);
         CompletableFuture<Void> secondRun = CompletableFuture.runAsync(worker::processPendingWorkflows);
         CompletableFuture.allOf(firstRun, secondRun).join();
 
+        long deadline = System.currentTimeMillis() + 2000;
+        while (workflowOrchestrator.invocations.get() == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        // Give a second concurrent poll a chance to race after the first claim.
+        Thread.sleep(100);
+        worker.processPendingWorkflows();
+        Thread.sleep(250);
+
         assertThat(workflowOrchestrator.invocations.get()).isEqualTo(1);
+    }
+
+    @Test
+    void skipsOrchestrationWhenRoleIsConsumeOnly() {
+        Workflow workflow = new Workflow();
+        workflow.setId(UUID.randomUUID());
+        workflow.setStatus(WorkflowStatus.PENDING);
+
+        WorkflowRepository workflowRepository = createRepository(workflow);
+        RecordingWorkflowOrchestrator workflowOrchestrator = new RecordingWorkflowOrchestrator(workflow.getId());
+        WorkflowWorker worker = new WorkflowWorker(workflowRepository, workflowOrchestrator, new WorkflowDispatchQueue(), 1, false);
+
+        worker.processPendingWorkflows();
+
+        assertThat(worker.isOrchestrationEnabled()).isFalse();
+        assertThat(workflowOrchestrator.invocations.get()).isZero();
     }
 
     private WorkflowRepository createRepository(Workflow workflow) {
@@ -64,7 +89,7 @@ class WorkflowWorkerTest {
         private final UUID workflowId;
 
         private RecordingWorkflowOrchestrator(UUID workflowId) {
-            super(null, null, null, null, null, null, new ObjectMapper(), new WorkflowAuditTracker(null, new ObjectMapper()), new NoOpTaskDispatchPublisher(), null, null, null);
+            super(null, null, null, null, null, null, new ObjectMapper(), new WorkflowAuditTracker(null, new ObjectMapper()), new NoOpTaskDispatchPublisher(), null, null);
             this.workflowId = workflowId;
         }
 

@@ -40,7 +40,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 12
-    profiles: ["app", "distributed"]
+    profiles: ["kafka", "distributed"]
 
   relay-api:
     build:
@@ -53,6 +53,7 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+        required: false
     environment:
       APP_ENV: dev
       DB_HOST: postgres
@@ -63,7 +64,8 @@ services:
       APP_PORT: ${APP_PORT:-8080}
       WORKER_MAX_CONCURRENCY: ${WORKER_MAX_CONCURRENCY:-4}
       WORKER_POLL_DELAY: ${WORKER_POLL_DELAY:-5000}
-      KAFKA_ENABLED: ${KAFKA_ENABLED:-true}
+      WORKER_ORCHESTRATION_ENABLED: ${WORKER_ORCHESTRATION_ENABLED:-true}
+      KAFKA_ENABLED: ${KAFKA_ENABLED:-false}
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC:-relay.workflow.events}
       KAFKA_CONSUMER_GROUP: ${KAFKA_CONSUMER_GROUP:-relay-workflow-events}
@@ -103,6 +105,7 @@ services:
       APP_PORT: 8081
       WORKER_MAX_CONCURRENCY: ${WORKER_MAX_CONCURRENCY:-4}
       WORKER_POLL_DELAY: ${WORKER_POLL_DELAY:-5000}
+      WORKER_ORCHESTRATION_ENABLED: "false"
       KAFKA_ENABLED: "true"
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: ${KAFKA_TOPIC:-relay.workflow.events}

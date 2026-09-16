@@ -30,9 +30,9 @@ public class DeadLetterController {
     }
 
     @GetMapping
-    public ResponseEntity<List<Map<String, Object>>> list(@RequestParam(name="workflowId", required = false) UUID workflowId) {
+    public ResponseEntity<List<Map<String, Object>>> list(@RequestParam(name = "workflowId", required = false) UUID workflowId) {
         List<Map<String, Object>> response = deadLetterTaskService.list(workflowId).stream()
-            .map(this::toResponse)
+            .map(this::toDeadLetterResponse)
             .collect(Collectors.toList());
         return ResponseEntity.ok(response);
     }
@@ -40,8 +40,15 @@ public class DeadLetterController {
     @PostMapping("/{id}/replay")
     public ResponseEntity<Map<String, Object>> replay(@PathVariable("id") UUID id) {
         try {
-            DeadLetterTask replayed = deadLetterTaskService.replay(id);
-            return ResponseEntity.ok(toResponse(replayed));
+            Task replayed = deadLetterTaskService.replay(id);
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("taskId", replayed.getId());
+            response.put("workflowId", replayed.getWorkflow() == null ? null : replayed.getWorkflow().getId());
+            response.put("taskStatus", replayed.getStatus() == null ? null : replayed.getStatus().name());
+            response.put("attemptCount", replayed.getAttemptCount());
+            response.put("intervention", "replayed");
+            response.put("note", "Task reset to PENDING; side effects re-run when rediscovered");
+            return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage());
         } catch (IllegalStateException ex) {
@@ -49,7 +56,7 @@ public class DeadLetterController {
         }
     }
 
-    private Map<String, Object> toResponse(DeadLetterTask deadLetter) {
+    private Map<String, Object> toDeadLetterResponse(DeadLetterTask deadLetter) {
         Task task = deadLetter.getTask();
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("id", deadLetter.getId());
@@ -64,8 +71,7 @@ public class DeadLetterController {
         response.put("attemptCount", deadLetter.getAttemptCount());
         response.put("error", deadLetter.getError());
         response.put("createdAt", deadLetter.getCreatedAt());
-        response.put("replayedAt", deadLetter.getReplayedAt());
-        response.put("intervention", deadLetter.getReplayedAt() == null ? "manual" : "replayed");
+        response.put("intervention", "manual");
         return response;
     }
 }

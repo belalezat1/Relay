@@ -323,14 +323,18 @@ class KafkaReliabilityTest {
         taskRepository.saveAndFlush(task);
         DeadLetterTask deadLetter = deadLetterTaskService.record(task, "boom");
         assertThat(deadLetter).isNotNull();
+        UUID deadLetterId = deadLetter.getId();
 
-        DeadLetterTask replayed = deadLetterTaskService.replay(deadLetter.getId());
-        assertThat(replayed.getReplayedAt()).isNotNull();
+        Task replayed = deadLetterTaskService.replay(deadLetterId);
+        assertThat(replayed.getStatus()).isEqualTo(TaskStatus.PENDING);
+        assertThat(replayed.getAttemptCount()).isZero();
+        assertThat(replayed.getExecutionClaimedAt()).isNull();
+        assertThat(replayed.getLockedBy()).isNull();
+        assertThat(deadLetterTaskRepository.findById(deadLetterId)).isEmpty();
 
         Task reloaded = taskRepository.findById(task.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(TaskStatus.PENDING);
-        assertThat(reloaded.getExecutionClaimedAt()).isNull();
-        assertThat(reloaded.getLockedBy()).isNull();
+        assertThat(reloaded.getAttemptCount()).isZero();
     }
 
     @Test
