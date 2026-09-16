@@ -17,8 +17,9 @@
 
 1. Ready tasks transition to `QUEUED` and an `outbox_events` row is written in the **same transaction**.
 2. `OutboxPublisher` polls unpublished rows (`SKIP LOCKED` when available) and produces to Kafka.
-3. `TaskDispatchConsumer` claims before side effects; duplicate / already-complete deliveries are no-ops.
+3. `TaskDispatchConsumer` claims before side effects; duplicate / already-complete deliveries are no-ops. After success it continues the DAG by calling `WorkflowOrchestrator` (queues newly ready dependents through the outbox).
 4. `WorkflowKafkaConsumer` projects lifecycle events into Micrometer counters and `workflow_event_projections` (telemetry only).
+5. Consume-only workers (`WORKER_ORCHESTRATION_ENABLED=false`) join `relay-workflow-task-group`. Topics default to 12 partitions so 1→N workers actually load-balance.
 
 ```mermaid
 sequenceDiagram

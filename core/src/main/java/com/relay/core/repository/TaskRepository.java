@@ -23,6 +23,8 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
 
     List<Task> findByStatus(TaskStatus status);
 
+    long countByStatus(TaskStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select task from Task task where task.id = :taskId")
     java.util.Optional<Task> findByIdForUpdate(@Param("taskId") UUID taskId);

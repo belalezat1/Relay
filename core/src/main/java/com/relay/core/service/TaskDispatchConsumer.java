@@ -25,7 +25,11 @@ import java.util.Map;
 import java.util.UUID;
 
 @Service
-@ConditionalOnProperty(name = "relay.kafka.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(
+    name = { "relay.kafka.enabled", "relay.kafka.task-consumer.enabled" },
+    havingValue = "true",
+    matchIfMissing = true
+)
 public class TaskDispatchConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(TaskDispatchConsumer.class);
@@ -44,6 +48,7 @@ public class TaskDispatchConsumer {
     private final OutboxService outboxService;
     private final KafkaRuntimeMetrics metrics;
     private final String taskTopic;
+    private final WorkflowOrchestrator workflowOrchestrator;
 
     public TaskDispatchConsumer(
         TaskRepository taskRepository,
@@ -61,6 +66,43 @@ public class TaskDispatchConsumer {
         @Autowired(required = false) KafkaRuntimeMetrics metrics,
         @Value("${relay.kafka.task-topic:relay.workflow.tasks}") String taskTopic
     ) {
+        this(
+            taskRepository,
+            taskAttemptRepository,
+            workflowRepository,
+            taskExecutionRegistry,
+            retryPolicy,
+            workflowAuditTracker,
+            objectMapper,
+            taskExecutionGuard,
+            deadLetterTaskService,
+            dispatchFailureService,
+            idempotencyService,
+            outboxService,
+            metrics,
+            taskTopic,
+            null
+        );
+    }
+
+    @Autowired
+    public TaskDispatchConsumer(
+        TaskRepository taskRepository,
+        TaskAttemptRepository taskAttemptRepository,
+        WorkflowRepository workflowRepository,
+        TaskExecutionRegistry taskExecutionRegistry,
+        RetryPolicy retryPolicy,
+        WorkflowAuditTracker workflowAuditTracker,
+        ObjectMapper objectMapper,
+        TaskExecutionGuard taskExecutionGuard,
+        DeadLetterTaskService deadLetterTaskService,
+        KafkaDispatchFailureService dispatchFailureService,
+        @Autowired(required = false) IdempotencyService idempotencyService,
+        @Autowired(required = false) OutboxService outboxService,
+        @Autowired(required = false) KafkaRuntimeMetrics metrics,
+        @Value("${relay.kafka.task-topic:relay.workflow.tasks}") String taskTopic,
+        @Autowired(required = false) WorkflowOrchestrator workflowOrchestrator
+    ) {
         this.taskRepository = taskRepository;
         this.taskAttemptRepository = taskAttemptRepository;
         this.workflowRepository = workflowRepository;
@@ -75,11 +117,13 @@ public class TaskDispatchConsumer {
         this.outboxService = outboxService;
         this.metrics = metrics;
         this.taskTopic = taskTopic;
+        this.workflowOrchestrator = workflowOrchestrator;
     }
 
     @KafkaListener(
         topics = "${relay.kafka.task-topic:relay.workflow.tasks}",
-        groupId = "${relay.kafka.task-consumer.group-id:relay-workflow-task-group}"
+        groupId = "${relay.kafka.task-consumer.group-id:relay-workflow-task-group}",
+        concurrency = "${relay.kafka.task-consumer.concurrency:1}"
     )
     @Transactional
     public void consume(Map<String, Object> payload) {
@@ -275,7 +319,17 @@ public class TaskDispatchConsumer {
             return;
         }
 
-        if (task.getStatus() == TaskStatus.SUCCEEDED || task.getStatus() == TaskStatus.PENDING) {
+        if (task.getStatus() == TaskStatus.SUCCEEDED && workflowOrchestrator != null) {
+            try {
+                workflowOrchestrator.executeWorkflow(workflow.getId());
+            } catch (RuntimeException ex) {
+                log.warn("Failed to continue workflow {} after Kafka task {}: {}",
+                    workflow.getId(), task.getId(), ex.getMessage());
+            }
+            return;
+        }
+
+        if (task.getStatus() == TaskStatus.PENDING) {
             workflowRepository.save(workflow);
             workflowAuditTracker.record(workflow, null, "workflow.state.changed", "Workflow resumed after Kafka-dispatched task update", Map.of("status", workflow.getStatus().name()));
         }

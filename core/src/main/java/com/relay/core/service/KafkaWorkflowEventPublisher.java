@@ -1,7 +1,7 @@
 package com.relay.core.service;
 
-import com.relay.core.model.Task;
 import com.relay.core.model.Workflow;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -20,17 +20,27 @@ import java.util.UUID;
 public class KafkaWorkflowEventPublisher implements WorkflowEventPublisher {
 
     private final OutboxService outboxService;
+    private final boolean lifecycleEventsEnabled;
 
     @Value("${relay.kafka.topic:relay.workflow.events}")
     private String topic;
 
     public KafkaWorkflowEventPublisher(OutboxService outboxService) {
+        this(outboxService, true);
+    }
+
+    @Autowired
+    public KafkaWorkflowEventPublisher(
+        OutboxService outboxService,
+        @Value("${relay.kafka.lifecycle-events.enabled:true}") boolean lifecycleEventsEnabled
+    ) {
         this.outboxService = outboxService;
+        this.lifecycleEventsEnabled = lifecycleEventsEnabled;
     }
 
     @Override
     public void publish(String eventType, Workflow workflow, UUID taskId, String message, Map<String, Object> metadata) {
-        if (workflow == null || workflow.getId() == null) {
+        if (!lifecycleEventsEnabled || workflow == null || workflow.getId() == null) {
             return;
         }
 

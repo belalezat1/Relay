@@ -10,7 +10,15 @@ Postgres remains the authoritative workflow and task store. Kafka transports tas
 | `relay.workflow.tasks.retry` | workflow id | Delayed retry commands after task failure | Delay enforced via outbox `next_attempt_at` before publish |
 | `relay.workflow.events` | workflow id | Workflow lifecycle audit events | Per-workflow event order only |
 
-Topics are auto-created in local Compose. Production should create them explicitly with enough partitions for worker concurrency. Partition count does not change dependency ordering; Postgres still decides which tasks are ready.
+Topics are created with **12 partitions** by default (`relay.kafka.topic-partitions` / `KAFKA_NUM_PARTITIONS` in Compose) so competing consumers in `relay-workflow-task-group` can scale. Kafka keys remain workflow id (per-workflow ordering). Partition count does not change dependency ordering; Postgres still decides which tasks are ready.
+
+Scale consume-only workers:
+
+```bash
+KAFKA_ENABLED=true docker compose --profile distributed up -d --scale relay-worker=3
+```
+
+The Compose `relay-api` process does **not** join the task consumer group (`KAFKA_TASK_CONSUMER_ENABLED=false`) so worker counts are not silently inflated.
 
 ## Consumer groups
 
@@ -49,6 +57,9 @@ Keep these aligned across `application.properties`, `application-prod.properties
 - `KAFKA_CONSUMER_GROUP` / `relay.kafka.consumer.group-id`
 - `KAFKA_TASK_TOPIC` / `relay.kafka.task-topic`
 - `KAFKA_TASK_CONSUMER_GROUP` / `relay.kafka.task-consumer.group-id`
+- `KAFKA_TASK_CONSUMER_ENABLED` / `relay.kafka.task-consumer.enabled`
+- `KAFKA_TASK_CONCURRENCY` / `relay.kafka.task-consumer.concurrency`
+- `KAFKA_TOPIC_PARTITIONS` / `relay.kafka.topic-partitions`
 - `KAFKA_TASK_RETRY_TOPIC` / `relay.kafka.task-retry-topic`
 - `KAFKA_RETRY_BACKOFF_ENABLED` / `relay.kafka.retry-backoff-enabled`
 

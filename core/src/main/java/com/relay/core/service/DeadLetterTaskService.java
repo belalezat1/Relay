@@ -6,6 +6,7 @@ import com.relay.core.model.TaskStatus;
 import com.relay.core.model.Workflow;
 import com.relay.core.model.WorkflowStatus;
 import com.relay.core.repository.DeadLetterTaskRepository;
+import com.relay.core.repository.IdempotencyOutcomeRepository;
 import com.relay.core.repository.TaskRepository;
 import com.relay.core.repository.WorkflowRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,9 +24,19 @@ public class DeadLetterTaskService {
     private final TaskRepository taskRepository;
     private final WorkflowRepository workflowRepository;
     private final WorkflowAuditTracker workflowAuditTracker;
+    private final IdempotencyOutcomeRepository idempotencyOutcomeRepository;
 
     public DeadLetterTaskService(DeadLetterTaskRepository repository) {
-        this(repository, null, null, null);
+        this(repository, null, null, null, null);
+    }
+
+    public DeadLetterTaskService(
+        DeadLetterTaskRepository repository,
+        TaskRepository taskRepository,
+        WorkflowRepository workflowRepository,
+        WorkflowAuditTracker workflowAuditTracker
+    ) {
+        this(repository, taskRepository, workflowRepository, workflowAuditTracker, null);
     }
 
     @Autowired
@@ -33,12 +44,14 @@ public class DeadLetterTaskService {
         DeadLetterTaskRepository repository,
         @Autowired(required = false) TaskRepository taskRepository,
         @Autowired(required = false) WorkflowRepository workflowRepository,
-        @Autowired(required = false) WorkflowAuditTracker workflowAuditTracker
+        @Autowired(required = false) WorkflowAuditTracker workflowAuditTracker,
+        @Autowired(required = false) IdempotencyOutcomeRepository idempotencyOutcomeRepository
     ) {
         this.repository = repository;
         this.taskRepository = taskRepository;
         this.workflowRepository = workflowRepository;
         this.workflowAuditTracker = workflowAuditTracker;
+        this.idempotencyOutcomeRepository = idempotencyOutcomeRepository;
     }
 
     @Transactional
@@ -96,6 +109,11 @@ public class DeadLetterTaskService {
         task.setLeaseExpiresAt(null);
         task.setNextAttemptAt(null);
         taskRepository.save(task);
+
+        if (idempotencyOutcomeRepository != null && task.getIdempotencyKey() != null && !task.getIdempotencyKey().isBlank()) {
+            idempotencyOutcomeRepository.findByIdempotencyKey(task.getIdempotencyKey())
+                .ifPresent(idempotencyOutcomeRepository::delete);
+        }
 
         Workflow workflow = task.getWorkflow();
         if (workflow == null && workflowId != null) {

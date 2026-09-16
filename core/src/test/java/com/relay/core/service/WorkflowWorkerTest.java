@@ -64,7 +64,8 @@ class WorkflowWorkerTest {
             WorkflowRepository.class.getClassLoader(),
             new Class<?>[] { WorkflowRepository.class },
             (proxy, method, args) -> {
-                if ("findAllByOrderByCreatedAtDesc".equals(method.getName())) {
+                if ("findAllByOrderByCreatedAtDesc".equals(method.getName())
+                    || "findByStatusInOrderByCreatedAtAsc".equals(method.getName())) {
                     return List.of(workflow);
                 }
                 if ("findAll".equals(method.getName())) {

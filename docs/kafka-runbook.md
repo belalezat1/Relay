@@ -4,8 +4,8 @@
 
 | Process | `WORKER_ORCHESTRATION_ENABLED` | `KAFKA_ENABLED` | Responsibility |
 | --- | --- | --- | --- |
-| `relay-api` | `true` (default) | on for distributed, off for app rollback | Accepts REST, orchestrates ready work, publishes task commands |
-| `relay-worker` | `false` | `true` | Consumes Kafka task/retry messages only |
+| `relay-api` | `true` (default) | on for distributed, off for app rollback | Accepts REST, orchestrates ready work, publishes task commands. Distributed profile sets `KAFKA_TASK_CONSUMER_ENABLED=false`. |
+| `relay-worker` | `false` | `true` | Consumes Kafka task/retry messages only. Scale with `--scale relay-worker=N`. |
 
 ## Minimum checks
 

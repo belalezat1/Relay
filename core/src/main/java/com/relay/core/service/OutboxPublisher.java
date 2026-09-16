@@ -14,10 +14,15 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.kafka.support.SendResult;
+
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Polls ready outbox rows and publishes them to Kafka. Transient broker failures
@@ -74,32 +79,59 @@ public class OutboxPublisher {
         this.jitterFraction = Math.max(0d, Math.min(1d, jitterFraction));
     }
 
-    @Scheduled(fixedDelayString = "${relay.outbox.poll-delay:1000}")
+    @Scheduled(fixedDelayString = "${relay.outbox.poll-delay:100}")
     @Transactional
     public int publishPending() {
         Instant now = Instant.now();
         List<OutboxEvent> pending = loadReady(now);
-        int published = 0;
+        if (pending.isEmpty()) {
+            return 0;
+        }
+
+        List<PendingSend> sends = new ArrayList<>(pending.size());
         for (OutboxEvent event : pending) {
             try {
                 Object payload = deserialize(event.getPayload());
                 String topic = resolveTopic(event);
                 String key = event.getAggregateId() == null ? event.getId().toString() : event.getAggregateId().toString();
-                kafkaTemplate.send(topic, key, payload).get();
-                event.setStatus(OutboxEvent.STATUS_PUBLISHED);
-                event.setPublishedAt(Instant.now());
-                event.setLastError(null);
-                event.setNextAttemptAt(null);
-                outboxEventRepository.save(event);
-                published++;
-                if (metrics != null && OutboxEvent.EVENT_TASK_DISPATCH.equals(event.getEventType())) {
-                    metrics.taskDispatched();
-                }
+                sends.add(new PendingSend(event, kafkaTemplate.send(topic, key, payload)));
             } catch (Exception ex) {
                 scheduleRetry(event, ex);
             }
         }
-        return published;
+
+        List<OutboxEvent> publishedEvents = new ArrayList<>(sends.size());
+        Instant publishedAt = Instant.now();
+        for (PendingSend send : sends) {
+            try {
+                send.future.get(10, TimeUnit.SECONDS);
+                send.event.setStatus(OutboxEvent.STATUS_PUBLISHED);
+                send.event.setPublishedAt(publishedAt);
+                send.event.setLastError(null);
+                send.event.setNextAttemptAt(null);
+                publishedEvents.add(send.event);
+                if (metrics != null && OutboxEvent.EVENT_TASK_DISPATCH.equals(send.event.getEventType())) {
+                    metrics.taskDispatched();
+                }
+            } catch (Exception ex) {
+                scheduleRetry(send.event, unwrap(ex));
+            }
+        }
+        if (!publishedEvents.isEmpty()) {
+            outboxEventRepository.saveAll(publishedEvents);
+        }
+        return publishedEvents.size();
+    }
+
+    private Exception unwrap(Exception ex) {
+        Throwable cause = ex.getCause();
+        if (cause instanceof Exception nested) {
+            return nested;
+        }
+        return ex;
+    }
+
+    private record PendingSend(OutboxEvent event, CompletableFuture<SendResult<String, Object>> future) {
     }
 
     private void scheduleRetry(OutboxEvent event, Exception ex) {
