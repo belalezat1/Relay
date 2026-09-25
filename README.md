@@ -1,152 +1,348 @@
 # Relay
 
-Durable, dependency-aware workflow orchestration. **PostgreSQL** is the source of truth; **Kafka** carries task dispatch, delayed retries, and lifecycle events through a transactional outbox (no fire-and-forget past the database).
+A durable workflow orchestration engine built with Java, Spring Boot, PostgreSQL, and Kafka.
 
-## What it does
+Relay executes dependency-aware task graphs while keeping workflow state durable in PostgreSQL. Tasks can be processed concurrently by distributed workers, retried after failures, and inspected through a REST API.
 
-- Submit a DAG over REST; Relay schedules ready tasks from dependency graphs
-- Claims work with Postgres row locks (`FOR UPDATE SKIP LOCKED`)
-- Retries with exponential backoff + jitter; exhausted tasks go to a DLQ with replay
-- Outbox-drained Kafka topics: `relay.workflow.tasks`, `relay.workflow.tasks.retry`, `relay.workflow.events`
-- Operator APIs for audit, dead-letter replay, dispatch failures, health, and metrics
+The project focuses on a few distributed-systems problems that appear in real workflow engines: durable state, dependency resolution, safe concurrent claiming, crash recovery, retries, and reliable event delivery.
 
-```mermaid
-flowchart LR
-  Client[REST client] --> API[relay-api]
-  API --> PG[(PostgreSQL SoT)]
-  API --> Outbox[outbox_events]
-  Outbox --> Publisher[OutboxPublisher]
-  Publisher --> Kafka[(Kafka)]
-  Kafka --> Tasks[TaskDispatchConsumer]
-  Kafka --> Retry[TaskRetryConsumer]
-  Kafka --> Events[WorkflowKafkaConsumer]
-  Tasks --> PG
-  Retry --> Outbox
-  Events --> PG
+## Architecture
+
+```text
+                    ┌─────────────────┐
+                    │     Client      │
+                    └────────┬────────┘
+                             │ REST
+                             ▼
+                    ┌─────────────────┐
+                    │   Relay API     │
+                    │   Spring Boot   │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │   PostgreSQL    │
+                    │                 │
+                    │ workflows       │
+                    │ tasks           │
+                    │ attempts        │
+                    │ outbox          │
+                    └───────┬─────────┘
+                            │
+                     transactional
+                        outbox
+                            │
+                            ▼
+                    ┌─────────────────┐
+                    │      Kafka      │
+                    │                 │
+                    │ task events     │
+                    │ retries         │
+                    │ lifecycle events│
+                    └────────┬────────┘
+                             │
+                  ┌──────────┴──────────┐
+                  ▼                     ▼
+         ┌────────────────┐    ┌────────────────┐
+         │ Relay Worker   │    │ Relay Worker   │
+         │                │    │                │
+         │ claim          │    │ claim          │
+         │ execute        │    │ execute        │
+         │ persist result │    │ persist result │
+         └────────────────┘    └────────────────┘
 ```
+
+PostgreSQL remains the source of truth for workflow and task state. Kafka is used as the distributed transport layer rather than as the authoritative workflow store.
+
+## Features
+
+- **Dependency-aware workflows** — tasks execute only after their dependencies complete.
+- **Durable execution state** — workflows, tasks, and attempts are persisted in PostgreSQL.
+- **Concurrent workers** — work can be processed across multiple worker instances.
+- **Task claim leases** — abandoned work can be recovered after a worker disappears.
+- **Retries and backoff** — failed tasks can be retried without losing workflow state.
+- **Dead-letter handling** — exhausted work can be isolated instead of blocking execution.
+- **Transactional outbox** — database state changes and events are coordinated without relying on unsafe database/broker dual writes.
+- **Kafka transport** — workflow events and task execution can be distributed through Kafka.
+- **Execution history** — task attempts provide an audit trail for failures and retries.
+- **REST API** — submit workflows and inspect their current state.
+- **Containerized local environment** — PostgreSQL, Kafka, API, and workers can run through Docker Compose.
+
+## Reliability model
+
+Relay treats PostgreSQL as the authoritative record of execution.
+
+This is intentional. A workflow should not disappear because a worker crashes or a broker temporarily becomes unavailable.
+
+### Durable task state
+
+Task state is committed to PostgreSQL before another part of the workflow depends on it. Workers operate on persisted state rather than keeping workflow progress only in memory.
+
+### Claim leases
+
+Workers claim tasks for a limited period of time.
+
+If a worker terminates while processing a task, its claim eventually expires and another worker can recover the work. This avoids requiring a single coordinator to permanently own a task.
+
+### Idempotent execution
+
+Because distributed delivery can happen more than once, task execution must tolerate redelivery.
+
+Relay's execution model is designed around idempotent handling rather than assuming the message broker provides exactly-once delivery.
+
+### Transactional outbox
+
+Publishing an event directly after committing database state creates a dual-write problem:
+
+```text
+commit database state
+        │
+        ├── process crashes here
+        │
+        ▼
+publish Kafka event
+```
+
+Relay avoids coupling those two independent writes directly.
+
+Instead, the event is first recorded with the corresponding database transaction. An outbox publisher later delivers it to Kafka.
+
+```text
+┌──────────────────────────────┐
+│ PostgreSQL transaction       │
+│                              │
+│ update workflow/task state   │
+│ write outbox event           │
+└──────────────┬───────────────┘
+               │ commit
+               ▼
+        ┌──────────────┐
+        │ Outbox worker│
+        └──────┬───────┘
+               │
+               ▼
+            Kafka
+```
+
+This makes retry and crash recovery explicit instead of depending on timing between PostgreSQL and Kafka.
 
 ## Tech stack
 
-- Java 21, Maven multi-module (`api`, `core`)
-- Spring Boot 3.4, Spring Data JPA, Flyway
-- PostgreSQL + Kafka (Compose)
-- Micrometer / Actuator
+| Component | Technology |
+|---|---|
+| Language | Java 21 |
+| Application framework | Spring Boot 3.4 |
+| Persistence | PostgreSQL |
+| ORM / data access | Spring Data JPA |
+| Migrations | Flyway |
+| Messaging | Apache Kafka |
+| Build | Maven |
+| Containers | Docker / Docker Compose |
+| Testing | JUnit, Spring Boot Test, Testcontainers |
 
-## Quickstart
+The repository is split into two Maven modules:
 
-Prerequisites: Java 21, Maven 3.9+, Docker.
-
-```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
-cp .env.example .env
-
-# Postgres + API (Kafka off by default in Compose app profile)
-KAFKA_ENABLED=false docker compose --profile app up -d --build
-
-# Postgres + Kafka + API orchestrator (no task consume) + consume-only worker
-KAFKA_ENABLED=true docker compose --profile distributed up -d --build
-
-# Scale competing Kafka workers (same consumer group, 12 partitions)
-KAFKA_ENABLED=true docker compose --profile distributed up -d --scale relay-worker=3
+```text
+Relay/
+├── api/                 # REST API and application runtime
+├── core/                # domain model and orchestration logic
+├── .github/workflows/   # CI
+├── docker-compose.yml
+└── pom.xml
 ```
 
-Health: `curl -s http://localhost:8080/api/actuator/health`
+## Quick start
 
-Submit a workflow:
+### Prerequisites
+
+- Java 21
+- Maven 3.9+
+- Docker
+
+Clone the repository:
+
+```bash
+git clone https://github.com/belalezat1/Relay.git
+cd Relay
+```
+
+Create your environment file:
+
+```bash
+cp .env.example .env
+```
+
+### Run PostgreSQL only
+
+```bash
+docker compose up -d postgres
+```
+
+Then run the application:
+
+```bash
+mvn test
+
+APP_ENV=dev \
+DB_HOST=localhost \
+DB_PORT=5432 \
+DB_NAME=relay_dev \
+DB_USERNAME=relay \
+DB_PASSWORD=relay_dev \
+APP_PORT=8080 \
+mvn -pl api spring-boot:run
+```
+
+The API will be available at:
+
+```text
+http://localhost:8080
+```
+
+## Run the distributed stack
+
+Relay also includes a Docker Compose profile for running PostgreSQL, Kafka, the API, and a separate worker.
+
+```bash
+docker compose --profile distributed up --build
+```
+
+The distributed profile separates API responsibilities from task consumption and enables Kafka-backed task processing.
+
+## Submit a workflow
+
+A workflow is submitted as a set of tasks and dependency relationships.
 
 ```bash
 curl -X POST http://localhost:8080/api/workflows \
   -H "Content-Type: application/json" \
   -d '{
     "tasks": [
-      {"id": "task-a", "type": "success"},
-      {"id": "task-b", "type": "success", "dependsOn": ["task-a"]}
+      {
+        "id": "fetch-data",
+        "type": "success"
+      },
+      {
+        "id": "process-data",
+        "type": "success",
+        "dependsOn": ["fetch-data"]
+      },
+      {
+        "id": "publish-result",
+        "type": "success",
+        "dependsOn": ["process-data"]
+      }
     ]
   }'
 ```
 
-```bash
-mvn test
-./scripts/kafka-smoke.sh   # distributed + Kafka-off rollback when Docker is up
-./scripts/benchmark.sh     # writes docs/benchmarks.md (1 vs 3 Kafka workers; Embedded Kafka if Docker is down)
+Relay stores the workflow and determines which tasks are eligible to execute based on their dependencies.
+
+```text
+fetch-data
+    │
+    ▼
+process-data
+    │
+    ▼
+publish-result
 ```
 
-## Resume-defensible metrics
+A DAG can also fan out:
 
-Every talking point below is either a JUnit assertion or a row generated by `scripts/benchmark.sh`. None of these numbers exist only in prose.
-
-| Claim | Evidence | Reproduce (<10 min) |
-| --- | --- | --- |
-| 500+ tasks/sec sustained on a fixed DAG | `docs/benchmarks.md` row `kafka N-worker` | `./scripts/benchmark.sh` |
-| ~3× throughput from 1 → 3 Kafka workers | `docs/benchmarks.md` scale factor | same command; Compose equivalent: `--scale relay-worker=1` then `=3` |
-| Zero duplicate side effects across 1,000+ crash/redelivery injections | `ResumeReliabilityClaimsTest.zeroDuplicateSideEffectsAcrossOneThousandCrashAndRedeliveryInjections` | `mvn test` |
-| 100% of exhausted retries land in inspectable DLQ with replay | `ResumeReliabilityClaimsTest.oneHundredPercentOfExhaustedRetriesLandInInspectableDlqWithReplay` plus `POST /dead-letters/{id}/replay` | `mvn test` |
-
-Workload used by the bench: `task-a (success) → task-b (success)`, warm-up DAGs then a measured window from consumer-group start until all measured tasks are `SUCCEEDED`. Postgres remains the source of truth; Kafka is transport via the outbox. Hardware, date, exact commands, and measured rates are written into [docs/benchmarks.md](docs/benchmarks.md) — that file is the source of truth, including if a given machine misses 500+/s or ~3×.
-
-```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
-mvn test
-./scripts/benchmark.sh
+```text
+                 ┌──► validate ──┐
+fetch-data ──────┤               ├──► publish
+                 └──► transform ─┘
 ```
 
-## Operator APIs
-
-```bash
-curl http://localhost:8080/api/dead-letters
-curl -X POST http://localhost:8080/api/dead-letters/<id>/replay
-curl http://localhost:8080/api/dispatch-failures
-curl http://localhost:8080/api/actuator/health
-curl http://localhost:8080/api/actuator/metrics
-```
+Only tasks whose dependencies have completed become eligible for execution.
 
 ## Configuration
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `KAFKA_ENABLED` | `true` (host) / Compose profile-specific | Kafka publishers/listeners + outbox drain |
-| `WORKER_ORCHESTRATION_ENABLED` | `true` | When `false`, process only consumes Kafka tasks |
-| `KAFKA_TASK_CONSUMER_ENABLED` | `true` (host) / `false` on Compose API | When `false`, this process orchestrates/publishes only (distributed API) |
-| `KAFKA_TASK_CONCURRENCY` | `1` | Competing Kafka consumers in this JVM (`@KafkaListener` concurrency) |
-| `KAFKA_TOPIC_PARTITIONS` | `12` | Task/retry/event topic partitions for worker scale-out |
-| `KAFKA_BROKERS` | `localhost:9092` | Bootstrap servers |
-| `KAFKA_TASK_TOPIC` | `relay.workflow.tasks` | Task dispatch topic |
-| `KAFKA_TASK_RETRY_TOPIC` | `relay.workflow.tasks.retry` | Delayed retry topic |
-| `KAFKA_TOPIC` | `relay.workflow.events` | Lifecycle events topic |
-| `RETRY_BACKOFF_ENABLED` | `true` | Exponential backoff + jitter |
-| `RETRY_MAX_ATTEMPTS` | `3` | Max attempts before DLQ |
-| `TASK_CLAIM_LEASE_SECONDS` | `300` | Execution lease duration |
-| `TASK_CLAIM_SKIP_LOCKED` | `true` | Postgres `SKIP LOCKED` claims |
-| `OUTBOX_POLL_DELAY` | `100` | Outbox drain interval (ms) |
-| `OUTBOX_BATCH_SIZE` | `200` | Outbox rows published per poll |
-| `OUTBOX_MAX_ATTEMPTS` | `8` | Publish attempts before outbox `FAILED` |
-| `WORKER_POLL_DELAY` | `200` | Orchestrator poll interval (ms) |
-| `WORKER_MAX_CONCURRENCY` | `4` | In-process workflow concurrency |
+Common runtime settings are exposed through environment variables.
 
-## Docs
+### Database
 
-- [Architecture](docs/architecture.md)
-- [Runbook](docs/runbook.md)
-- [Kafka contract](docs/kafka-contract.md)
-- [Kafka runbook](docs/kafka-runbook.md)
-- [Phase IX status (COMPLETE)](docs/phase-ix.md)
-- [Benchmarks](docs/benchmarks.md)
+```text
+DB_HOST
+DB_PORT
+DB_NAME
+DB_USERNAME
+DB_PASSWORD
+DB_POOL_SIZE
+```
 
-## Resume talking points (tested)
+### Worker
 
-1. 500+ tasks/sec and 1→3 worker scale: measured in [docs/benchmarks.md](docs/benchmarks.md) (`./scripts/benchmark.sh`).
-2. Zero duplicate side effects across 1,000+ crash/redelivery injections (`ResumeReliabilityClaimsTest`).
-3. 100% of exhausted retries land in `/dead-letters` with `POST /dead-letters/{id}/replay` (`ResumeReliabilityClaimsTest` + `ApiControllerTest`).
-4. Concurrent claim path: two claimers cannot both receive `CLAIMED` for the same ready task (`KafkaReliabilityTest`).
-5. Dispatch/retry/lifecycle messages are written to `outbox_events` in the same transaction as state changes before broker publish.
+```text
+WORKER_MAX_CONCURRENCY
+WORKER_POLL_DELAY
+WORKER_BATCH_SIZE
+WORKER_ORCHESTRATION_ENABLED
+TASK_CLAIM_LEASE_SECONDS
+WORKER_ID
+```
 
-## Troubleshooting
+### Kafka
 
-- **Java 26 vs 21**: set `JAVA_HOME` to OpenJDK 21 before `mvn`.
-- **Tasks stuck RUNNING**: lease recovery returns expired claims to `PENDING`.
-- **No consume**: confirm `OutboxPublisher` marks rows `PUBLISHED`; check `/api/dispatch-failures`.
-- **Duplicate idempotency_key**: submit rejected while a non-terminal task holds the key.
+```text
+KAFKA_ENABLED
+KAFKA_BROKERS
+KAFKA_TOPIC
+KAFKA_CONSUMER_GROUP
+
+KAFKA_TASK_TOPIC
+KAFKA_TASK_CONSUMER_GROUP
+KAFKA_TASK_CONSUMER_ENABLED
+KAFKA_TASK_CONCURRENCY
+KAFKA_TASK_RETRY_TOPIC
+KAFKA_TASK_RETRY_CONSUMER_GROUP
+KAFKA_TOPIC_PARTITIONS
+```
+
+### Retry and outbox
+
+```text
+RETRY_BACKOFF_ENABLED
+RETRY_MAX_ATTEMPTS
+
+OUTBOX_POLL_DELAY
+OUTBOX_BATCH_SIZE
+OUTBOX_MAX_ATTEMPTS
+```
+
+See [`.env.example`](./.env.example) for the development defaults.
+
+## Testing
+
+Run the full Maven test suite:
+
+```bash
+mvn test
+```
+
+The project uses JUnit and Spring's testing stack, with Testcontainers available for integration testing against real infrastructure.
+
+## Design principles
+
+Relay intentionally keeps several responsibilities separate:
+
+**PostgreSQL owns state.**  
+Workflow correctness does not depend on Kafka retaining the only copy of execution state.
+
+**Kafka transports work.**  
+Messaging allows execution to move across process boundaries without turning the broker into the workflow database.
+
+**Workers are replaceable.**  
+A worker should be able to disappear without permanently owning the work it was executing.
+
+**Delivery may repeat.**  
+Retries and broker redelivery are expected, so correctness comes from durable state and idempotency rather than optimistic exactly-once assumptions.
+
+**The API is not the worker.**  
+The distributed runtime can separate request handling from task execution and scale them independently.
 
 ## License
 
-See `LICENSE`.
+MIT
